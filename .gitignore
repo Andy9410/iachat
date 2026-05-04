@@ -1,0 +1,19 @@
+# Maven / Gradle
+target/
+build/
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+out/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / config sensibles
+.env

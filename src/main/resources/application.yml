@@ -1,27 +1,14 @@
 server:
   port: 8080
-
 spring:
   application:
     name: chat-service
 
-  # PostgreSQL + pgvector (preparado, descomentar cuando esté disponible)
-  # datasource:
-  #   url: jdbc:postgresql://localhost:5432/academy_chat
-  #   username: ${DB_USER:academy}
-  #   password: ${DB_PASS:academy}
-  # jpa:
-  #   hibernate:
-  #     ddl-auto: validate
-  #   properties:
-  #     hibernate:
-  #       dialect: org.hibernate.dialect.PostgreSQLDialect
-
 llm:
-  provider: mock   # Cambiar a "ollama" cuando integres Ollama
-  ollama:
-    base-url: http://localhost:11434
-    model: llama3
+  provider: ollama
+  base-url: http://localhost:11434
+  model: qwen2.5:14b
+  timeout-seconds: 120
 
 management:
   endpoints:

@@ -1,0 +1,7 @@
+llm:
+  provider: mock
+  ollama:
+    base-url: http://localhost:11434
+    model: qwen2.5:14b
+    connect-timeout-seconds: 10
+    request-timeout-seconds: 120

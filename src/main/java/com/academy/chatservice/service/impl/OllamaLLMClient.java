@@ -1,11 +1,11 @@
 package com.academy.chatservice.service.impl;
 
+import com.academy.chatservice.config.OllamaProperties;
 import com.academy.chatservice.service.LLMClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -23,32 +23,26 @@ public class OllamaLLMClient implements LLMClient {
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final OllamaProperties props;
 
-    @Value("${llm.base-url:http://localhost:11434}")
-    private String baseUrl;
-
-    @Value("${llm.model:qwen2.5:14b}")
-    private String model;
-
-    @Value("${llm.timeout-seconds:120}")
-    private int timeoutSeconds;
-
-    public OllamaLLMClient(ObjectMapper objectMapper) {
+    public OllamaLLMClient(ObjectMapper objectMapper, OllamaProperties props) {
         this.objectMapper = objectMapper;
+        this.props = props;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(props.connectTimeoutSeconds()))
                 .build();
     }
 
     @Override
     public String generate(String prompt) {
         try {
-            String body = objectMapper.writeValueAsString(new OllamaRequest(model, prompt, false));
+            String body = objectMapper.writeValueAsString(
+                    new OllamaRequest(props.model(), prompt, false));
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/api/generate"))
+                    .uri(URI.create(props.baseUrl() + "/api/generate"))
                     .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(timeoutSeconds))
+                    .timeout(Duration.ofSeconds(props.requestTimeoutSeconds()))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 

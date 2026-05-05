@@ -15,6 +15,9 @@ public class Conversation {
 
     private String title;
 
+    @Column(columnDefinition = "TEXT")
+    private String summary;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -30,6 +33,8 @@ public class Conversation {
     public Long getId() { return id; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
+    public String getSummary() { return summary; }
+    public void setSummary(String summary) { this.summary = summary; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public List<Message> getMessages() { return messages; }
 }

@@ -9,8 +9,15 @@ import com.academy.chatservice.repository.MessageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Service
 public class ChatService {
+
+    private static final int WINDOW_SIZE = 20;
+    private static final int COMPACTION_THRESHOLD = 50;
 
     private final LLMClient llmClient;
     private final ConversationRepository conversationRepository;
@@ -34,14 +41,39 @@ public class ChatService {
 
         var conversation = resolveConversation(request.conversationId(), text);
 
+        long messageCount = messageRepository.countByConversationId(conversation.getId());
+
+        compactIfNeeded(conversation, messageCount);
+
         saveMessage(conversation, Message.Role.user, text);
 
-        // TODO: enriquecer con contexto RAG (pgvector) antes de llamar al LLM
-        var llmResponse = llmClient.generate(buildPrompt(text));
+        var window = getWindow(conversation.getId());
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
         return new ChatResponse(llmResponse, conversation.getId());
+    }
+
+    private void compactIfNeeded(Conversation conversation, long messageCount) {
+        if (messageCount <= COMPACTION_THRESHOLD) return;
+        // recompact at 51, 71, 91... (every 20 messages past the threshold)
+        if ((messageCount - COMPACTION_THRESHOLD) % WINDOW_SIZE != 1) return;
+
+        long toSummarize = messageCount - WINDOW_SIZE;
+        List<Message> oldMessages = messageRepository.findFirstN(conversation.getId(), (int) toSummarize);
+
+        String summaryPrompt = buildSummaryPrompt(conversation.getSummary(), oldMessages);
+        String newSummary = llmClient.generate(summaryPrompt);
+
+        conversation.setSummary(newSummary);
+        conversationRepository.save(conversation);
+    }
+
+    private List<Message> getWindow(Long conversationId) {
+        List<Message> last = messageRepository.findLastN(conversationId, WINDOW_SIZE);
+        Collections.reverse(last);
+        return last;
     }
 
     private Conversation resolveConversation(Long conversationId, String firstMessage) {
@@ -62,13 +94,44 @@ public class ChatService {
         messageRepository.save(msg);
     }
 
-    private String buildPrompt(String userMessage) {
-        // TODO: inyectar fragmentos recuperados por similitud semántica
-        return """
+    private String buildPrompt(String userMessage, String summary, List<Message> window) {
+        var sb = new StringBuilder();
+        sb.append("""
                 Eres un tutor inteligente de una academia de programación.
                 Responde de forma clara, precisa y pedagógica.
+                """);
 
-                Pregunta del estudiante: %s
-                """.formatted(userMessage);
+        if (summary != null && !summary.isBlank()) {
+            sb.append("\nResumen de la conversación anterior:\n").append(summary).append("\n");
+        }
+
+        if (!window.isEmpty()) {
+            sb.append("\nHistorial reciente:\n");
+            for (Message m : window) {
+                String role = m.getRole() == Message.Role.user ? "Estudiante" : "Tutor";
+                sb.append(role).append(": ").append(m.getContent()).append("\n");
+            }
+        }
+
+        sb.append("\nPregunta del estudiante: ").append(userMessage);
+        return sb.toString();
+    }
+
+    private String buildSummaryPrompt(String existingSummary, List<Message> messages) {
+        var sb = new StringBuilder();
+        sb.append("Resume de forma concisa la siguiente conversación entre un estudiante y un tutor de programación.\n");
+
+        if (existingSummary != null && !existingSummary.isBlank()) {
+            sb.append("Resumen previo: ").append(existingSummary).append("\n\n");
+        }
+
+        sb.append("Conversación a resumir:\n");
+        for (Message m : messages) {
+            String role = m.getRole() == Message.Role.user ? "Estudiante" : "Tutor";
+            sb.append(role).append(": ").append(m.getContent()).append("\n");
+        }
+
+        sb.append("\nResumen:");
+        return sb.toString();
     }
 }

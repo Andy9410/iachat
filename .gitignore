@@ -17,3 +17,6 @@ Thumbs.db
 
 # Env / config sensibles
 .env
+
+# Claude Code local config
+.claude/

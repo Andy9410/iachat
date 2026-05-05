@@ -37,8 +37,8 @@ class ChatControllerTest {
 
     @Test
     void chat_conMensajeValido_debeRetornarRespuesta() throws Exception {
-        var request  = new ChatRequest("¿Qué es una variable?");
-        var response = new ChatResponse("Una variable es un espacio en memoria...");
+        var request  = new ChatRequest("¿Qué es una variable?", null);
+        var response = new ChatResponse("Una variable es un espacio en memoria...", 1L);
 
         when(chatService.process(request)).thenReturn(response);
 
@@ -46,7 +46,22 @@ class ChatControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.response").value("Una variable es un espacio en memoria..."));
+                .andExpect(jsonPath("$.response").value("Una variable es un espacio en memoria..."))
+                .andExpect(jsonPath("$.conversationId").value(1));
+    }
+
+    @Test
+    void chat_conConversacionExistente_debeRetornarMismoId() throws Exception {
+        var request  = new ChatRequest("¿Qué es herencia?", 5L);
+        var response = new ChatResponse("La herencia es...", 5L);
+
+        when(chatService.process(request)).thenReturn(response);
+
+        mockMvc.perform(post("/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.conversationId").value(5));
     }
 
     @Test

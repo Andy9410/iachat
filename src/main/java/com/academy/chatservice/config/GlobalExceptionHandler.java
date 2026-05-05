@@ -16,17 +16,17 @@ public class GlobalExceptionHandler {
                 .map(e -> e.getField() + ": " + e.getDefaultMessage())
                 .findFirst()
                 .orElse("Validation error");
-        return ResponseEntity.badRequest().body(new ChatResponse(message));
+        return ResponseEntity.badRequest().body(new ChatResponse(message, null));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ChatResponse> handleIllegalArgument(IllegalArgumentException ex) {
-        return ResponseEntity.badRequest().body(new ChatResponse(ex.getMessage()));
+        return ResponseEntity.badRequest().body(new ChatResponse(ex.getMessage(), null));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ChatResponse> handleGeneric(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ChatResponse("Error interno del servidor"));
+                .body(new ChatResponse("Error interno del servidor", null));
     }
 }

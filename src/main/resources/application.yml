@@ -24,6 +24,11 @@ llm:
     connect-timeout-seconds: 10
     request-timeout-seconds: 300
 
+chat:
+  context:
+    window-size: 2
+    compaction-threshold: 6
+
 management:
   endpoints:
     web:

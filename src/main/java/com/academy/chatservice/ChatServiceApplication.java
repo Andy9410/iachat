@@ -1,13 +1,14 @@
 package com.academy.chatservice;
 
 import com.academy.chatservice.config.ChatContextProperties;
+import com.academy.chatservice.config.GroqProperties;
 import com.academy.chatservice.config.OllamaProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({OllamaProperties.class, ChatContextProperties.class})
+@EnableConfigurationProperties({OllamaProperties.class, ChatContextProperties.class, GroqProperties.class})
 
 public class ChatServiceApplication {
 

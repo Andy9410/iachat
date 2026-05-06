@@ -17,6 +17,7 @@ Thumbs.db
 
 # Env / config sensibles
 .env
+src/main/resources/application-local.yml
 
 # Claude Code local config
 .claude/

@@ -1,5 +1,6 @@
 package com.academy.chatservice.service;
 
+import com.academy.chatservice.config.ChatContextProperties;
 import com.academy.chatservice.model.ChatRequest;
 import com.academy.chatservice.model.ChatResponse;
 import com.academy.chatservice.model.Conversation;
@@ -11,24 +12,23 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class ChatService {
 
-    private static final int WINDOW_SIZE = 20;
-    private static final int COMPACTION_THRESHOLD = 50;
-
     private final LLMClient llmClient;
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
+    private final ChatContextProperties contextProps;
 
     public ChatService(LLMClient llmClient,
                        ConversationRepository conversationRepository,
-                       MessageRepository messageRepository) {
+                       MessageRepository messageRepository,
+                       ChatContextProperties contextProps) {
         this.llmClient = llmClient;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
+        this.contextProps = contextProps;
     }
 
     @Transactional
@@ -47,7 +47,7 @@ public class ChatService {
 
         saveMessage(conversation, Message.Role.user, text);
 
-        var window = getWindow(conversation.getId());
+        var window = getWindow(conversation.getId(), contextProps.windowSize());
         var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
@@ -56,11 +56,12 @@ public class ChatService {
     }
 
     private void compactIfNeeded(Conversation conversation, long messageCount) {
-        if (messageCount <= COMPACTION_THRESHOLD) return;
-        // recompact at 51, 71, 91... (every 20 messages past the threshold)
-        if ((messageCount - COMPACTION_THRESHOLD) % WINDOW_SIZE != 1) return;
+        int threshold = contextProps.compactionThreshold();
+        int window = contextProps.windowSize();
+        if (messageCount <= threshold) return;
+        if ((messageCount - threshold) % window != 0) return;
 
-        long toSummarize = messageCount - WINDOW_SIZE;
+        long toSummarize = messageCount - window;
         List<Message> oldMessages = messageRepository.findFirstN(conversation.getId(), (int) toSummarize);
 
         String summaryPrompt = buildSummaryPrompt(conversation.getSummary(), oldMessages);
@@ -70,8 +71,8 @@ public class ChatService {
         conversationRepository.save(conversation);
     }
 
-    private List<Message> getWindow(Long conversationId) {
-        List<Message> last = messageRepository.findLastN(conversationId, WINDOW_SIZE);
+    private List<Message> getWindow(Long conversationId, int windowSize) {
+        List<Message> last = messageRepository.findLastN(conversationId, windowSize);
         Collections.reverse(last);
         return last;
     }

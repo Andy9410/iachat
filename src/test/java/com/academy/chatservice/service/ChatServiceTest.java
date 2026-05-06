@@ -110,16 +110,16 @@ class ChatServiceTest {
 
     // --- Tests de compactación ---
     // contextProps: windowSize=4, compactionThreshold=6
-    // Fórmula: messageCount > 6 AND (messageCount - 6) % 4 == 1
-    // Primer disparo: messageCount=7, segundo: messageCount=11
+    // Fórmula: messageCount > 6 AND (messageCount - 6) % 4 == 0
+    // Primer disparo: messageCount=10, segundo: messageCount=14
 
     @Test
     void compactacion_seDispara_alSuperarUmbralEnPrimerCiclo() {
-        // messageCount=7 → (7-6)%4=1 → se compacta, toSummarize=3
+        // messageCount=10 → (10-6)%4=0 → se compacta, toSummarize=6
         var conv = conversationMock(10L);
         when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
-        when(messageRepository.countByConversationId(10L)).thenReturn(7L);
-        when(messageRepository.findFirstN(eq(10L), eq(3))).thenReturn(List.of());
+        when(messageRepository.countByConversationId(10L)).thenReturn(10L);
+        when(messageRepository.findFirstN(eq(10L), eq(6))).thenReturn(List.of());
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen generado", "respuesta del tutor");
 
@@ -147,7 +147,7 @@ class ChatServiceTest {
 
     @Test
     void compactacion_noSeDispara_fueraDelCicloDeCompactacion() {
-        // messageCount=8 → (8-6)%4=2 ≠ 1 → no se compacta
+        // messageCount=8 → (8-6)%4=2 ≠ 0 → no se compacta
         var conv = conversationMock(10L);
         when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
         when(messageRepository.countByConversationId(10L)).thenReturn(8L);
@@ -161,11 +161,11 @@ class ChatServiceTest {
 
     @Test
     void compactacion_seDispara_enSegundoCiclo() {
-        // messageCount=11 → (11-6)%4=1 → se compacta, toSummarize=7
+        // messageCount=14 → (14-6)%4=0 → se compacta, toSummarize=10
         var conv = conversationMock(10L);
         when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
-        when(messageRepository.countByConversationId(10L)).thenReturn(11L);
-        when(messageRepository.findFirstN(eq(10L), eq(7))).thenReturn(List.of());
+        when(messageRepository.countByConversationId(10L)).thenReturn(14L);
+        when(messageRepository.findFirstN(eq(10L), eq(10))).thenReturn(List.of());
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen ciclo 2", "respuesta");
 
@@ -179,12 +179,12 @@ class ChatServiceTest {
     void compactacion_elPromptDeResumenContieneElHistorial() {
         var conv = conversationMock(10L);
         when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
-        when(messageRepository.countByConversationId(10L)).thenReturn(7L);
+        when(messageRepository.countByConversationId(10L)).thenReturn(10L);
 
         var msg = mock(Message.class);
         when(msg.getRole()).thenReturn(Message.Role.user);
         when(msg.getContent()).thenReturn("contenido de prueba");
-        when(messageRepository.findFirstN(eq(10L), eq(3))).thenReturn(List.of(msg));
+        when(messageRepository.findFirstN(eq(10L), eq(6))).thenReturn(List.of(msg));
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen", "respuesta");
 

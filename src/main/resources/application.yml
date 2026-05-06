@@ -17,12 +17,22 @@ spring:
     locations: classpath:db/migration
 
 llm:
-  provider: ollama
+  provider: ${LLM_PROVIDER:groq}
   ollama:
     base-url: ${OLLAMA_URL:http://localhost:11434}
     model: ${OLLAMA_MODEL:qwen2.5:14b}
     connect-timeout-seconds: 10
-    request-timeout-seconds: 120
+    request-timeout-seconds: 300
+  groq:
+    api-key: ${GROQ_API_KEY:}
+    model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+    connect-timeout-seconds: 10
+    request-timeout-seconds: 60
+
+chat:
+  context:
+    window-size: 2
+    compaction-threshold: 6
 
 management:
   endpoints:

@@ -5,6 +5,7 @@ import com.academy.chatservice.model.ChatRequest;
 import com.academy.chatservice.model.Conversation;
 import com.academy.chatservice.model.Message;
 import com.academy.chatservice.repository.ConversationRepository;
+import com.academy.chatservice.repository.MessageEmbeddingRepository;
 import com.academy.chatservice.repository.MessageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,10 +27,16 @@ class ChatServiceTest {
     private LLMClient llmClient;
 
     @Mock
+    private EmbeddingClient embeddingClient;
+
+    @Mock
     private ConversationRepository conversationRepository;
 
     @Mock
     private MessageRepository messageRepository;
+
+    @Mock
+    private MessageEmbeddingRepository messageEmbeddingRepository;
 
     private ChatService chatService;
 
@@ -37,7 +44,9 @@ class ChatServiceTest {
 
     @BeforeEach
     void setUp() {
-        chatService = new ChatService(llmClient, conversationRepository, messageRepository, contextProps);
+        lenient().when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
+        chatService = new ChatService(llmClient, embeddingClient, conversationRepository,
+                messageRepository, messageEmbeddingRepository, contextProps);
     }
 
     @Test

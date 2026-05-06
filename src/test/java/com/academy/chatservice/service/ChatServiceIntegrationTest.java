@@ -16,6 +16,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
+
 // threshold=6, window=2 (application.yml)
 // Mensajes en pares (user+assistant): count=0,2,4,6,8,10...
 // Fórmula: count > 6 AND (count-6)%2==0 → primer disparo al 5to request (count=8)
@@ -25,6 +27,12 @@ class ChatServiceIntegrationTest {
     @MockBean
     private LLMClient llmClient;
 
+    @MockBean
+    private EmbeddingClient embeddingClient;
+
+    @MockBean
+    private com.academy.chatservice.repository.MessageEmbeddingRepository messageEmbeddingRepository;
+
     @Autowired
     private ChatService chatService;
 
@@ -32,6 +40,11 @@ class ChatServiceIntegrationTest {
     private ConversationRepository conversationRepository;
 
     private final List<Long> createdIds = new ArrayList<>();
+
+    @BeforeEach
+    void setUp() {
+        when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
+    }
 
     @AfterEach
     void cleanup() {

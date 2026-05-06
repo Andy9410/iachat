@@ -29,6 +29,10 @@ llm:
     connect-timeout-seconds: 10
     request-timeout-seconds: 60
 
+cloudflare:
+  account-id: ${CLOUDFLARE_ACCOUNT_ID:}
+  api-token: ${CLOUDFLARE_API_TOKEN:}
+
 chat:
   context:
     window-size: 2

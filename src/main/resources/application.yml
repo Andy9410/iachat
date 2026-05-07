@@ -45,6 +45,9 @@ chat:
       Eres un tutor inteligente de una academia de programación.
       Responde de forma clara, precisa y pedagógica.
 
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8081}
+
 management:
   endpoints:
     web:

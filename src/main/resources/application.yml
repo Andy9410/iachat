@@ -40,6 +40,7 @@ chat:
     window-size: 2
     compaction-threshold: 6
     title-max-length: 50
+    rag-top-k: 3
     system-prompt: >
       Eres un tutor inteligente de una academia de programación.
       Responde de forma clara, precisa y pedagógica.

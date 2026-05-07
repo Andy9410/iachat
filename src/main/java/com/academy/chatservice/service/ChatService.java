@@ -47,13 +47,14 @@ public class ChatService {
         var conversation = resolveConversation(request.conversationId(), text);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
-
         compactIfNeeded(conversation, messageCount);
 
-        saveMessage(conversation, Message.Role.user, text);
+        String vectorStr = toVectorString(embeddingClient.embed(text));
+        saveUserMessage(conversation, text, vectorStr);
 
+        var similar = messageEmbeddingRepository.findSimilar(vectorStr, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window));
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -92,26 +93,42 @@ public class ChatService {
         return conversationRepository.save(conv);
     }
 
+    private void saveUserMessage(Conversation conversation, String content, String vectorStr) {
+        var msg = new Message();
+        msg.setConversation(conversation);
+        msg.setRole(Message.Role.user);
+        msg.setContent(content);
+        messageRepository.save(msg);
+        messageEmbeddingRepository.insertEmbedding(msg.getId(), vectorStr);
+    }
+
     private void saveMessage(Conversation conversation, Message.Role role, String content) {
         var msg = new Message();
         msg.setConversation(conversation);
         msg.setRole(role);
         msg.setContent(content);
         messageRepository.save(msg);
-
-        if (role == Message.Role.user) {
-            var vector = embeddingClient.embed(content);
-            String vectorStr = vector.stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
-            messageEmbeddingRepository.insertEmbedding(msg.getId(), vectorStr);
-        }
     }
 
-    private String buildPrompt(String userMessage, String summary, List<Message> window) {
+    private String toVectorString(List<Float> vector) {
+        return vector.stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
+    }
+
+    private String buildPrompt(String userMessage, String summary, List<Message> window,
+                               List<SimilarMessageProjection> similar) {
         var sb = new StringBuilder();
         sb.append(contextProps.systemPrompt()).append("\n");
 
+        if (!similar.isEmpty()) {
+            sb.append("\nContexto relevante de otras conversaciones:\n");
+            for (var s : similar) {
+                String role = "user".equals(s.getRole()) ? "Estudiante" : "Tutor";
+                sb.append(role).append(": ").append(s.getContent()).append("\n");
+            }
+        }
+
         if (summary != null && !summary.isBlank()) {
-            sb.append("\nResumen de la conversación anterior:\n").append(summary).append("\n");
+            sb.append("\nResumen de esta conversación:\n").append(summary).append("\n");
         }
 
         if (!window.isEmpty()) {

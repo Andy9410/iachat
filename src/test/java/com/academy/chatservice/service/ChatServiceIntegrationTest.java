@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.when;
 
@@ -44,6 +44,7 @@ class ChatServiceIntegrationTest {
     @BeforeEach
     void setUp() {
         when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
+        when(messageEmbeddingRepository.findSimilar(anyString(), anyLong(), anyInt())).thenReturn(List.of());
     }
 
     @AfterEach

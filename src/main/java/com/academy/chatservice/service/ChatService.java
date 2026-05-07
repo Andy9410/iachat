@@ -1,33 +1,38 @@
 package com.academy.chatservice.service;
 
 import com.academy.chatservice.config.ChatContextProperties;
-import com.academy.chatservice.model.ChatRequest;
-import com.academy.chatservice.model.ChatResponse;
-import com.academy.chatservice.model.Conversation;
-import com.academy.chatservice.model.Message;
+import com.academy.chatservice.model.*;
 import com.academy.chatservice.repository.ConversationRepository;
+import com.academy.chatservice.repository.MessageEmbeddingRepository;
 import com.academy.chatservice.repository.MessageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class ChatService {
 
     private final LLMClient llmClient;
+    private final EmbeddingClient embeddingClient;
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
+    private final MessageEmbeddingRepository messageEmbeddingRepository;
     private final ChatContextProperties contextProps;
 
     public ChatService(LLMClient llmClient,
+                       EmbeddingClient embeddingClient,
                        ConversationRepository conversationRepository,
                        MessageRepository messageRepository,
+                       MessageEmbeddingRepository messageEmbeddingRepository,
                        ChatContextProperties contextProps) {
         this.llmClient = llmClient;
+        this.embeddingClient = embeddingClient;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
+        this.messageEmbeddingRepository = messageEmbeddingRepository;
         this.contextProps = contextProps;
     }
 
@@ -59,7 +64,6 @@ public class ChatService {
         int threshold = contextProps.compactionThreshold();
         int window = contextProps.windowSize();
         if (messageCount <= threshold) return;
-        if ((messageCount - threshold) % window != 0) return;
 
         long toSummarize = messageCount - window;
         List<Message> oldMessages = messageRepository.findFirstN(conversation.getId(), (int) toSummarize);
@@ -83,7 +87,8 @@ public class ChatService {
                     .orElseThrow(() -> new IllegalArgumentException("Conversación no encontrada: " + conversationId));
         }
         var conv = new Conversation();
-        conv.setTitle(firstMessage.length() > 50 ? firstMessage.substring(0, 50) : firstMessage);
+        int max = contextProps.titleMaxLength();
+        conv.setTitle(firstMessage.length() > max ? firstMessage.substring(0, max) : firstMessage);
         return conversationRepository.save(conv);
     }
 
@@ -93,14 +98,17 @@ public class ChatService {
         msg.setRole(role);
         msg.setContent(content);
         messageRepository.save(msg);
+
+        if (role == Message.Role.user) {
+            var vector = embeddingClient.embed(content);
+            String vectorStr = vector.stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
+            messageEmbeddingRepository.insertEmbedding(msg.getId(), vectorStr);
+        }
     }
 
     private String buildPrompt(String userMessage, String summary, List<Message> window) {
         var sb = new StringBuilder();
-        sb.append("""
-                Eres un tutor inteligente de una academia de programación.
-                Responde de forma clara, precisa y pedagógica.
-                """);
+        sb.append(contextProps.systemPrompt()).append("\n");
 
         if (summary != null && !summary.isBlank()) {
             sb.append("\nResumen de la conversación anterior:\n").append(summary).append("\n");

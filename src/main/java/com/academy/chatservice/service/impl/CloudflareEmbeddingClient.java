@@ -29,7 +29,7 @@ public class CloudflareEmbeddingClient implements EmbeddingClient {
         this.objectMapper = objectMapper;
         this.props = props;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(props.connectTimeoutSeconds()))
                 .build();
     }
 
@@ -38,14 +38,13 @@ public class CloudflareEmbeddingClient implements EmbeddingClient {
         try {
             String body = objectMapper.writeValueAsString(new EmbedRequest(List.of(text)));
 
-            String url = "https://api.cloudflare.com/client/v4/accounts/"
-                    + props.accountId() + "/ai/run/" + props.embeddingModel();
+            String url = props.baseUrl() + "/accounts/" + props.accountId() + "/ai/run/" + props.embeddingModel();
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + props.apiToken())
-                    .timeout(Duration.ofSeconds(30))
+                    .timeout(Duration.ofSeconds(props.requestTimeoutSeconds()))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 

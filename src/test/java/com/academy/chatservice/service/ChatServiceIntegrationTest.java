@@ -20,7 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 
 // threshold=6, window=2 (application.yml)
 // Mensajes en pares (user+assistant): count=0,2,4,6,8,10...
-// Fórmula: count > 6 AND (count-6)%2==0 → primer disparo al 5to request (count=8)
+// Fórmula: count > 6 → primer disparo al 5to request (count=8), y en cada request siguiente
 @SpringBootTest
 class ChatServiceIntegrationTest {
 
@@ -90,18 +90,18 @@ class ChatServiceIntegrationTest {
     }
 
     @Test
-    void compactacion_ciclos_multiples_actualizan_summary_acumulado() {
+    void compactacion_actualiza_summary_en_cada_request_posterior_al_umbral() {
         when(llmClient.generate(anyString())).thenReturn("Respuesta del tutor");
         when(llmClient.generate(argThat(p -> p != null && p.startsWith("Resume"))))
-                .thenReturn("Resumen ciclo 1", "Resumen ciclo 2");
+                .thenReturn("Resumen request 5", "Resumen request 6");
 
         Long id = startConversation("pregunta 1");
         for (int i = 2; i <= 6; i++) {
             chatService.process(new ChatRequest("pregunta " + i, id));
         }
-        // req 5 → count=8 → ciclo 1; req 6 → count=10 → ciclo 2
+        // req 5 → count=8 → compacta; req 6 → count=10 → compacta de nuevo
 
         var conv = conversationRepository.findById(id).orElseThrow();
-        assertThat(conv.getSummary()).isEqualTo("Resumen ciclo 2");
+        assertThat(conv.getSummary()).isEqualTo("Resumen request 6");
     }
 }

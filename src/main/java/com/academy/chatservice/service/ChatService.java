@@ -64,7 +64,6 @@ public class ChatService {
         int threshold = contextProps.compactionThreshold();
         int window = contextProps.windowSize();
         if (messageCount <= threshold) return;
-        if ((messageCount - threshold) % window != 0) return;
 
         long toSummarize = messageCount - window;
         List<Message> oldMessages = messageRepository.findFirstN(conversation.getId(), (int) toSummarize);
@@ -88,7 +87,8 @@ public class ChatService {
                     .orElseThrow(() -> new IllegalArgumentException("Conversación no encontrada: " + conversationId));
         }
         var conv = new Conversation();
-        conv.setTitle(firstMessage.length() > 50 ? firstMessage.substring(0, 50) : firstMessage);
+        int max = contextProps.titleMaxLength();
+        conv.setTitle(firstMessage.length() > max ? firstMessage.substring(0, max) : firstMessage);
         return conversationRepository.save(conv);
     }
 
@@ -108,10 +108,7 @@ public class ChatService {
 
     private String buildPrompt(String userMessage, String summary, List<Message> window) {
         var sb = new StringBuilder();
-        sb.append("""
-                Eres un tutor inteligente de una academia de programación.
-                Responde de forma clara, precisa y pedagógica.
-                """);
+        sb.append(contextProps.systemPrompt()).append("\n");
 
         if (summary != null && !summary.isBlank()) {
             sb.append("\nResumen de la conversación anterior:\n").append(summary).append("\n");

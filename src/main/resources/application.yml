@@ -32,11 +32,17 @@ llm:
 cloudflare:
   account-id: ${CLOUDFLARE_ACCOUNT_ID:}
   api-token: ${CLOUDFLARE_API_TOKEN:}
+  connect-timeout-seconds: 10
+  request-timeout-seconds: 30
 
 chat:
   context:
     window-size: 2
     compaction-threshold: 6
+    title-max-length: 50
+    system-prompt: >
+      Eres un tutor inteligente de una academia de programación.
+      Responde de forma clara, precisa y pedagógica.
 
 management:
   endpoints:

@@ -58,6 +58,12 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.openai</groupId>
+            <artifactId>openai-java</artifactId>
+            <version>4.35.0</version>
+        </dependency>
     </dependencies>
 
     <build>

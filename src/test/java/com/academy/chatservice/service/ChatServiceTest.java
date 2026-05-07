@@ -41,11 +41,12 @@ class ChatServiceTest {
     private ChatService chatService;
 
     private final ChatContextProperties contextProps = new ChatContextProperties(4, 6, 50,
-            "Eres un tutor inteligente de una academia de programación. Responde de forma clara, precisa y pedagógica.");
+            "Eres un tutor inteligente de una academia de programación. Responde de forma clara, precisa y pedagógica.", 3);
 
     @BeforeEach
     void setUp() {
         lenient().when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
+        lenient().when(messageEmbeddingRepository.findSimilar(anyString(), anyLong(), anyInt())).thenReturn(List.of());
         chatService = new ChatService(llmClient, embeddingClient, conversationRepository,
                 messageRepository, messageEmbeddingRepository, contextProps);
     }

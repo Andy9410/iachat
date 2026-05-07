@@ -4,14 +4,17 @@ Servicio de chat inteligente construido con Spring Boot 3.2.5 y Java 21. Expone 
 
 ## Setup
 
-**Requisitos:** Java 21, Maven, [Ollama](https://ollama.com) con el modelo `qwen2.5:14b` descargado.
+**Requisitos:** Java 21, Maven, cuenta en [Groq](https://console.groq.com) con una API key.
+
+Configurá la API key en el perfil `local` (ej. `application-local.properties`):
+
+```properties
+groq.api-key=tu_api_key
+```
 
 ```bash
-# 1. Descargar el modelo en Ollama
-ollama pull qwen2.5:14b
-
-# 2. Compilar y ejecutar
-./mvnw spring-boot:run
+# Compilar y ejecutar
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 El servicio queda disponible en `http://localhost:8080`.

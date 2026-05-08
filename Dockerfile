@@ -9,4 +9,4 @@ FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/target/chat-service-*.jar app.jar
 EXPOSE 8080
-ENTRYPOINT ["java", "-Xms32m", "-Xmx160m", "-XX:MaxMetaspaceSize=80m", "-XX:+UseSerialGC", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Xms32m", "-Xmx128m", "-XX:MaxMetaspaceSize=100m", "-XX:+UseSerialGC", "-jar", "app.jar"]

@@ -13,6 +13,9 @@ public class Conversation {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "user_email", length = 150)
+    private String userEmail;
+
     private String title;
 
     @Column(columnDefinition = "TEXT")
@@ -31,6 +34,8 @@ public class Conversation {
     }
 
     public Long getId() { return id; }
+    public String getUserEmail() { return userEmail; }
+    public void setUserEmail(String userEmail) { this.userEmail = userEmail; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getSummary() { return summary; }

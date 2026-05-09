@@ -19,25 +19,17 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 
 // threshold=6, window=2 (application.yml)
-// Mensajes en pares (user+assistant): count=0,2,4,6,8,10...
-// Fórmula: count > 6 → primer disparo al 5to request (count=8), y en cada request siguiente
 @SpringBootTest
 class ChatServiceIntegrationTest {
 
-    @MockBean
-    private LLMClient llmClient;
+    private static final String USER_EMAIL = "test@test.com";
 
-    @MockBean
-    private EmbeddingClient embeddingClient;
+    @MockBean private LLMClient llmClient;
+    @MockBean private EmbeddingClient embeddingClient;
+    @MockBean private com.academy.chatservice.repository.MessageEmbeddingRepository messageEmbeddingRepository;
 
-    @MockBean
-    private com.academy.chatservice.repository.MessageEmbeddingRepository messageEmbeddingRepository;
-
-    @Autowired
-    private ChatService chatService;
-
-    @Autowired
-    private ConversationRepository conversationRepository;
+    @Autowired private ChatService chatService;
+    @Autowired private ConversationRepository conversationRepository;
 
     private final List<Long> createdIds = new ArrayList<>();
 
@@ -54,7 +46,7 @@ class ChatServiceIntegrationTest {
     }
 
     private Long startConversation(String firstMessage) {
-        var r = chatService.process(new ChatRequest(firstMessage, null));
+        var r = chatService.process(new ChatRequest(firstMessage, null), USER_EMAIL);
         createdIds.add(r.conversationId());
         return r.conversationId();
     }
@@ -66,10 +58,10 @@ class ChatServiceIntegrationTest {
                 .thenReturn("Resumen: POO incluye herencia, encapsulación e interfaces.");
 
         Long id = startConversation("¿Qué es POO?");
-        chatService.process(new ChatRequest("¿Qué es herencia?", id));
-        chatService.process(new ChatRequest("¿Qué es interfaz?", id));
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id));
-        chatService.process(new ChatRequest("¿Qué es polimorfismo?", id));  // count=8 → compacta
+        chatService.process(new ChatRequest("¿Qué es herencia?",    id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es interfaz?",    id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es encapsulación?", id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es polimorfismo?",  id), USER_EMAIL);
 
         var conv = conversationRepository.findById(id).orElseThrow();
         assertThat(conv.getSummary())
@@ -82,9 +74,9 @@ class ChatServiceIntegrationTest {
         when(llmClient.generate(anyString())).thenReturn("Respuesta");
 
         Long id = startConversation("¿Qué es POO?");
-        chatService.process(new ChatRequest("¿Qué es herencia?", id));
-        chatService.process(new ChatRequest("¿Qué es interfaz?", id));
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id));  // count=6 → no compacta
+        chatService.process(new ChatRequest("¿Qué es herencia?",      id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es interfaz?",      id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es encapsulación?", id), USER_EMAIL);
 
         var conv = conversationRepository.findById(id).orElseThrow();
         assertThat(conv.getSummary()).isNull();
@@ -98,9 +90,8 @@ class ChatServiceIntegrationTest {
 
         Long id = startConversation("pregunta 1");
         for (int i = 2; i <= 6; i++) {
-            chatService.process(new ChatRequest("pregunta " + i, id));
+            chatService.process(new ChatRequest("pregunta " + i, id), USER_EMAIL);
         }
-        // req 5 → count=8 → compacta; req 6 → count=10 → compacta de nuevo
 
         var conv = conversationRepository.findById(id).orElseThrow();
         assertThat(conv.getSummary()).isEqualTo("Resumen request 6");

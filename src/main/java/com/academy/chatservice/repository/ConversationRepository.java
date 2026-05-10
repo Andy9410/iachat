@@ -8,7 +8,7 @@ import java.util.Optional;
 
 public interface ConversationRepository extends JpaRepository<Conversation, Long> {
 
-    List<Conversation> findByUserEmailOrderByCreatedAtDesc(String userEmail);
+    List<Conversation> findByUserEmailAndHiddenFalseOrderByCreatedAtDesc(String userEmail);
 
     Optional<Conversation> findByIdAndUserEmail(Long id, String userEmail);
 }

@@ -65,7 +65,7 @@ public class ChatService {
 
     @Transactional(readOnly = true)
     public List<ConversationSummaryDto> getMyConversations(String userEmail) {
-        return conversationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail)
+        return conversationRepository.findByUserEmailAndHiddenFalseOrderByCreatedAtDesc(userEmail)
                 .stream()
                 .map(c -> new ConversationSummaryDto(
                         c.getId(),
@@ -91,7 +91,8 @@ public class ChatService {
     public void deleteConversation(Long conversationId, String userEmail) {
         Conversation conv = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
-        conversationRepository.delete(conv);
+        conv.setHidden(true);
+        conversationRepository.save(conv);
     }
 
     private void compactIfNeeded(Conversation conversation, long messageCount) {

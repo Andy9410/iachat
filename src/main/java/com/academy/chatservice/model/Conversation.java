@@ -24,6 +24,9 @@ public class Conversation {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(nullable = false)
+    private boolean hidden = false;
+
     @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @OrderBy("createdAt ASC")
     private List<Message> messages = new ArrayList<>();
@@ -42,4 +45,6 @@ public class Conversation {
     public void setSummary(String summary) { this.summary = summary; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public List<Message> getMessages() { return messages; }
+    public boolean isHidden() { return hidden; }
+    public void setHidden(boolean hidden) { this.hidden = hidden; }
 }

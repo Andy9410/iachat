@@ -13,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
@@ -23,20 +24,13 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ChatServiceTest {
 
-    @Mock
-    private LLMClient llmClient;
+    private static final String USER_EMAIL = "test@test.com";
 
-    @Mock
-    private EmbeddingClient embeddingClient;
-
-    @Mock
-    private ConversationRepository conversationRepository;
-
-    @Mock
-    private MessageRepository messageRepository;
-
-    @Mock
-    private MessageEmbeddingRepository messageEmbeddingRepository;
+    @Mock private LLMClient llmClient;
+    @Mock private EmbeddingClient embeddingClient;
+    @Mock private ConversationRepository conversationRepository;
+    @Mock private MessageRepository messageRepository;
+    @Mock private MessageEmbeddingRepository messageEmbeddingRepository;
 
     private ChatService chatService;
 
@@ -57,7 +51,7 @@ class ChatServiceTest {
         when(conversationRepository.save(any())).thenReturn(conv);
         when(llmClient.generate(anyString())).thenReturn("Respuesta del LLM");
 
-        var response = chatService.process(new ChatRequest("¿Qué es Java?", null));
+        var response = chatService.process(new ChatRequest("¿Qué es Java?", null), USER_EMAIL);
 
         assertThat(response.response()).isEqualTo("Respuesta del LLM");
         assertThat(response.conversationId()).isEqualTo(1L);
@@ -68,10 +62,10 @@ class ChatServiceTest {
     @Test
     void process_conConversacionExistente_reutilizaConversacion() {
         var conv = conversationMock(42L);
-        when(conversationRepository.findById(42L)).thenReturn(Optional.of(conv));
+        when(conversationRepository.findByIdAndUserEmail(42L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(llmClient.generate(anyString())).thenReturn("ok");
 
-        var response = chatService.process(new ChatRequest("¿Qué es herencia?", 42L));
+        var response = chatService.process(new ChatRequest("¿Qué es herencia?", 42L), USER_EMAIL);
 
         assertThat(response.conversationId()).isEqualTo(42L);
         verify(conversationRepository, never()).save(any());
@@ -79,11 +73,10 @@ class ChatServiceTest {
 
     @Test
     void process_conConversacionInexistente_lanzaExcepcion() {
-        when(conversationRepository.findById(99L)).thenReturn(Optional.empty());
+        when(conversationRepository.findByIdAndUserEmail(99L, USER_EMAIL)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> chatService.process(new ChatRequest("hola", 99L)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("99");
+        assertThatThrownBy(() -> chatService.process(new ChatRequest("hola", 99L), USER_EMAIL))
+                .isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
@@ -92,7 +85,7 @@ class ChatServiceTest {
         when(conversationRepository.save(any())).thenReturn(conv);
         when(llmClient.generate(anyString())).thenReturn("ok");
 
-        chatService.process(new ChatRequest("¿Qué es un bucle?", null));
+        chatService.process(new ChatRequest("¿Qué es un bucle?", null), USER_EMAIL);
 
         var captor = ArgumentCaptor.forClass(String.class);
         verify(llmClient).generate(captor.capture());
@@ -101,7 +94,7 @@ class ChatServiceTest {
 
     @Test
     void process_conMensajeSoloEspacios_lanzaExcepcion() {
-        assertThatThrownBy(() -> chatService.process(new ChatRequest("   ", null)))
+        assertThatThrownBy(() -> chatService.process(new ChatRequest("   ", null), USER_EMAIL))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("El mensaje no puede estar vacío");
     }
@@ -112,7 +105,7 @@ class ChatServiceTest {
         when(conversationRepository.save(any())).thenReturn(conv);
         when(llmClient.generate(anyString())).thenReturn("ok");
 
-        chatService.process(new ChatRequest("  ¿Qué es un objeto?  ", null));
+        chatService.process(new ChatRequest("  ¿Qué es un objeto?  ", null), USER_EMAIL);
 
         var captor = ArgumentCaptor.forClass(String.class);
         verify(llmClient).generate(captor.capture());
@@ -120,20 +113,17 @@ class ChatServiceTest {
     }
 
     // --- Tests de compactación ---
-    // contextProps: windowSize=4, compactionThreshold=6
-    // Fórmula: messageCount > threshold → se compacta (sin condición de ciclo)
 
     @Test
     void compactacion_seDispara_alSuperarUmbral() {
-        // messageCount=7 → 7 > 6 → se compacta, toSummarize=7-4=3
         var conv = conversationMock(10L);
-        when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
+        when(conversationRepository.findByIdAndUserEmail(10L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(messageRepository.countByConversationId(10L)).thenReturn(7L);
         when(messageRepository.findFirstN(eq(10L), eq(3))).thenReturn(List.of());
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen generado", "respuesta del tutor");
 
-        var response = chatService.process(new ChatRequest("pregunta", 10L));
+        var response = chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
 
         verify(llmClient, times(2)).generate(anyString());
         verify(conv).setSummary("resumen generado");
@@ -143,13 +133,12 @@ class ChatServiceTest {
 
     @Test
     void compactacion_noSeDispara_conMensajesIgualesAlUmbral() {
-        // messageCount=6 → 6 <= 6 → no se compacta
         var conv = conversationMock(10L);
-        when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
+        when(conversationRepository.findByIdAndUserEmail(10L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(messageRepository.countByConversationId(10L)).thenReturn(6L);
         when(llmClient.generate(anyString())).thenReturn("respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L));
+        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
 
         verify(llmClient, times(1)).generate(anyString());
         verify(conversationRepository, never()).save(any());
@@ -157,13 +146,12 @@ class ChatServiceTest {
 
     @Test
     void compactacion_noSeDispara_conMensajesPorDebajoDelUmbral() {
-        // messageCount=4 → 4 <= 6 → no se compacta
         var conv = conversationMock(10L);
-        when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
+        when(conversationRepository.findByIdAndUserEmail(10L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(messageRepository.countByConversationId(10L)).thenReturn(4L);
         when(llmClient.generate(anyString())).thenReturn("respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L));
+        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
 
         verify(llmClient, times(1)).generate(anyString());
         verify(conversationRepository, never()).save(any());
@@ -171,15 +159,14 @@ class ChatServiceTest {
 
     @Test
     void compactacion_seDispara_enCadaRequestAlSuperarUmbral() {
-        // messageCount=14 → 14 > 6 → se compacta, toSummarize=14-4=10
         var conv = conversationMock(10L);
-        when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
+        when(conversationRepository.findByIdAndUserEmail(10L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(messageRepository.countByConversationId(10L)).thenReturn(14L);
         when(messageRepository.findFirstN(eq(10L), eq(10))).thenReturn(List.of());
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen actualizado", "respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L));
+        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
 
         verify(llmClient, times(2)).generate(anyString());
         verify(conv).setSummary("resumen actualizado");
@@ -188,7 +175,7 @@ class ChatServiceTest {
     @Test
     void compactacion_elPromptDeResumenContieneElHistorial() {
         var conv = conversationMock(10L);
-        when(conversationRepository.findById(10L)).thenReturn(Optional.of(conv));
+        when(conversationRepository.findByIdAndUserEmail(10L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(messageRepository.countByConversationId(10L)).thenReturn(7L);
 
         var msg = mock(Message.class);
@@ -198,7 +185,7 @@ class ChatServiceTest {
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen", "respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L));
+        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
 
         var captor = ArgumentCaptor.forClass(String.class);
         verify(llmClient, times(2)).generate(captor.capture());

@@ -5,8 +5,10 @@ import com.academy.chatservice.model.*;
 import com.academy.chatservice.repository.ConversationRepository;
 import com.academy.chatservice.repository.MessageEmbeddingRepository;
 import com.academy.chatservice.repository.MessageRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Collections;
 import java.util.List;
@@ -37,14 +39,14 @@ public class ChatService {
     }
 
     @Transactional
-    public ChatResponse process(ChatRequest request) {
+    public ChatResponse process(ChatRequest request, String userEmail) {
         var text = request.message().trim();
 
         if (text.isBlank()) {
             throw new IllegalArgumentException("El mensaje no puede estar vacío");
         }
 
-        var conversation = resolveConversation(request.conversationId(), text);
+        var conversation = resolveConversation(request.conversationId(), text, userEmail);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
         compactIfNeeded(conversation, messageCount);
@@ -59,6 +61,37 @@ public class ChatService {
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
         return new ChatResponse(llmResponse, conversation.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationSummaryDto> getMyConversations(String userEmail) {
+        return conversationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail)
+                .stream()
+                .map(c -> new ConversationSummaryDto(
+                        c.getId(),
+                        c.getTitle(),
+                        c.getCreatedAt(),
+                        (int) messageRepository.countByConversationId(c.getId())
+                ))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MessageDto> getConversationMessages(Long conversationId, String userEmail) {
+        conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+
+        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId)
+                .stream()
+                .map(m -> new MessageDto(m.getId(), m.getRole().name(), m.getContent(), m.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void deleteConversation(Long conversationId, String userEmail) {
+        Conversation conv = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+        conversationRepository.delete(conv);
     }
 
     private void compactIfNeeded(Conversation conversation, long messageCount) {
@@ -82,12 +115,13 @@ public class ChatService {
         return last;
     }
 
-    private Conversation resolveConversation(Long conversationId, String firstMessage) {
+    private Conversation resolveConversation(Long conversationId, String firstMessage, String userEmail) {
         if (conversationId != null) {
-            return conversationRepository.findById(conversationId)
-                    .orElseThrow(() -> new IllegalArgumentException("Conversación no encontrada: " + conversationId));
+            return conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
         }
         var conv = new Conversation();
+        conv.setUserEmail(userEmail);
         int max = contextProps.titleMaxLength();
         conv.setTitle(firstMessage.length() > max ? firstMessage.substring(0, max) : firstMessage);
         return conversationRepository.save(conv);

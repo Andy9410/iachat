@@ -36,7 +36,7 @@ class ChatServiceIntegrationTest {
     @BeforeEach
     void setUp() {
         when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
-        when(messageEmbeddingRepository.findSimilar(anyString(), anyLong(), anyInt())).thenReturn(List.of());
+        when(messageEmbeddingRepository.findSimilar(anyString(), anyString(), anyLong(), anyInt())).thenReturn(List.of());
     }
 
     @AfterEach

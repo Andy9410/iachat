@@ -19,12 +19,15 @@ public interface MessageEmbeddingRepository extends JpaRepository<MessageEmbeddi
             SELECT m.content AS content, m.role AS role
             FROM message_embeddings me
             JOIN messages m ON m.id = me.message_id
-            WHERE m.conversation_id != :excludeConversationId
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE c.user_email = :userEmail
+              AND m.conversation_id != :excludeConversationId
             ORDER BY me.embedding <=> CAST(:embedding AS vector)
             LIMIT :topK
             """, nativeQuery = true)
     List<SimilarMessageProjection> findSimilar(
             @Param("embedding") String embedding,
+            @Param("userEmail") String userEmail,
             @Param("excludeConversationId") Long excludeConversationId,
             @Param("topK") int topK);
 }

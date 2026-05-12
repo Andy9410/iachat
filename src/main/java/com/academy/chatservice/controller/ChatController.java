@@ -4,6 +4,7 @@ import com.academy.chatservice.model.*;
 import com.academy.chatservice.service.ChatService;
 import com.academy.chatservice.service.LLMClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,7 +66,11 @@ public class ChatController {
 
     @PostMapping("/chat/stream")
     public SseEmitter chatStream(@Valid @RequestBody ChatRequest request,
-                                 @AuthenticationPrincipal String userEmail) {
+                                 @AuthenticationPrincipal String userEmail,
+                                 HttpServletResponse response) {
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache, no-transform");
+
         SseEmitter emitter = new SseEmitter(120_000L);
         CompletableFuture.runAsync(() -> {
             try {
@@ -92,7 +97,7 @@ public class ChatController {
                 try {
                     emitter.send(SseEmitter.event().data("{\"type\":\"error\"}"));
                 } catch (Exception ignored) {}
-                emitter.completeWithError(e);
+                emitter.complete();
             }
         });
         return emitter;

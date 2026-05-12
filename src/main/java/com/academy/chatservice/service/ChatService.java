@@ -54,7 +54,7 @@ public class ChatService {
         String vectorStr = toVectorString(embeddingClient.embed(text));
         saveUserMessage(conversation, text, vectorStr);
 
-        var similar = messageEmbeddingRepository.findSimilar(vectorStr, conversation.getId(), contextProps.ragTopK());
+        var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
         var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar));
 

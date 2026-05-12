@@ -40,7 +40,7 @@ class ChatServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
-        lenient().when(messageEmbeddingRepository.findSimilar(anyString(), anyLong(), anyInt())).thenReturn(List.of());
+        lenient().when(messageEmbeddingRepository.findSimilar(anyString(), anyString(), anyLong(), anyInt())).thenReturn(List.of());
         chatService = new ChatService(llmClient, embeddingClient, conversationRepository,
                 messageRepository, messageEmbeddingRepository, contextProps);
     }

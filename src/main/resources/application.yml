@@ -65,3 +65,9 @@ management:
     web:
       exposure:
         include: health, info
+
+sentry:
+  dsn: https://c51a2fdf9cba5fa33cfcf70dac45a9ad@o4511384546377728.ingest.us.sentry.io/4511384635375616
+  environment: ${SENTRY_ENVIRONMENT:production}
+  send-default-pii: true
+  traces-sample-rate: 0.0

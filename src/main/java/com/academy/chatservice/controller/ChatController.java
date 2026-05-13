@@ -4,6 +4,7 @@ import com.academy.chatservice.model.*;
 import com.academy.chatservice.service.ChatService;
 import com.academy.chatservice.service.LLMClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.sentry.Sentry;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -101,8 +102,15 @@ public class ChatController {
             sse(writer, "{\"type\":\"done\"}");
         } catch (Exception e) {
             log.error("Error en /chat/stream: {}", e.getMessage(), e);
+            Sentry.captureException(e);
             try { sse(writer, "{\"type\":\"error\"}"); } catch (Exception ignored) {}
         }
+    }
+
+    // TODO: remove after verifying Sentry is working
+    @GetMapping("/debug/sentry-test")
+    public void sentryTest() {
+        throw new RuntimeException("Sentry test — podés borrar este endpoint");
     }
 
     private void sse(PrintWriter writer, String data) throws IOException {

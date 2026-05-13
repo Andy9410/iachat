@@ -65,3 +65,8 @@ management:
     web:
       exposure:
         include: health, info
+
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:production}
+  traces-sample-rate: 0.0

@@ -94,6 +94,38 @@ public class ChatService {
         return new ChatResponse(llmResponse, conversation.getId());
     }
 
+    public record StreamPreparation(Long conversationId, String prompt) {}
+
+    @Transactional
+    public StreamPreparation prepareStream(ChatRequest request, String userEmail) {
+        var text = request.message().trim();
+
+        if (text.isBlank()) {
+            throw new IllegalArgumentException("El mensaje no puede estar vacío");
+        }
+
+        var conversation = resolveConversation(request.conversationId(), text, userEmail);
+
+        long messageCount = messageRepository.countByConversationId(conversation.getId());
+        compactIfNeeded(conversation, messageCount);
+
+        String vectorStr = toVectorString(embeddingClient.embed(text));
+        saveUserMessage(conversation, text, vectorStr);
+
+        var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
+        var window = getWindow(conversation.getId(), contextProps.windowSize());
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar);
+
+        return new StreamPreparation(conversation.getId(), prompt);
+    }
+
+    @Transactional
+    public void finalizeStream(Long conversationId, String assistantResponse) {
+        var conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+        saveMessage(conv, Message.Role.assistant, assistantResponse);
+    }
+
     @Transactional(readOnly = true)
     public List<ConversationSummaryDto> getMyConversations(String userEmail) {
         return conversationRepository.findByUserEmailAndHiddenFalseOrderByCreatedAtDesc(userEmail)

@@ -13,9 +13,10 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 @RestController
 public class ChatController {
@@ -65,41 +66,40 @@ public class ChatController {
     }
 
     @PostMapping("/chat/stream")
-    public SseEmitter chatStream(@Valid @RequestBody ChatRequest request,
-                                 @AuthenticationPrincipal String userEmail,
-                                 HttpServletResponse response) {
-        response.setHeader("X-Accel-Buffering", "no");
+    public void chatStream(@Valid @RequestBody ChatRequest request,
+                           @AuthenticationPrincipal String userEmail,
+                           HttpServletResponse response) throws IOException {
+        response.setContentType("text/event-stream;charset=UTF-8");
         response.setHeader("Cache-Control", "no-cache, no-transform");
+        response.setHeader("X-Accel-Buffering", "no");
 
-        SseEmitter emitter = new SseEmitter(120_000L);
-        CompletableFuture.runAsync(() -> {
-            try {
-                var prep = chatService.prepareStream(request, userEmail);
-                emitter.send(SseEmitter.event().data(
-                        objectMapper.writeValueAsString(Map.of("type", "meta", "conversationId", prep.conversationId()))
-                ));
-                var full = new StringBuilder();
-                llmClient.generateStream(prep.prompt(), chunk -> {
-                    full.append(chunk);
-                    try {
-                        emitter.send(SseEmitter.event().data(
-                                objectMapper.writeValueAsString(Map.of("type", "chunk", "text", chunk))
-                        ));
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-                chatService.finalizeStream(prep.conversationId(), full.toString());
-                emitter.send(SseEmitter.event().data("{\"type\":\"done\"}"));
-                emitter.complete();
-            } catch (Exception e) {
-                log.error("Error en /chat/stream: {}", e.getMessage(), e);
+        PrintWriter writer = response.getWriter();
+        try {
+            var prep = chatService.prepareStream(request, userEmail);
+            sse(writer, objectMapper.writeValueAsString(
+                    Map.of("type", "meta", "conversationId", prep.conversationId())));
+
+            var full = new StringBuilder();
+            llmClient.generateStream(prep.prompt(), chunk -> {
+                full.append(chunk);
                 try {
-                    emitter.send(SseEmitter.event().data("{\"type\":\"error\"}"));
-                } catch (Exception ignored) {}
-                emitter.complete();
-            }
-        });
-        return emitter;
+                    sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", chunk)));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            chatService.finalizeStream(prep.conversationId(), full.toString());
+            sse(writer, "{\"type\":\"done\"}");
+        } catch (Exception e) {
+            log.error("Error en /chat/stream: {}", e.getMessage(), e);
+            try { sse(writer, "{\"type\":\"error\"}"); } catch (Exception ignored) {}
+        }
+    }
+
+    private void sse(PrintWriter writer, String data) throws IOException {
+        writer.write("data:" + data + "\n\n");
+        writer.flush();
+        if (writer.checkError()) throw new IOException("client disconnected");
     }
 }

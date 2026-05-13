@@ -9,7 +9,7 @@ import java.util.function.Consumer;
 public interface LLMClient {
     String generate(String prompt);
 
-    default void generateStream(String prompt, Consumer<String> onChunk) {
-        onChunk.accept(generate(prompt));
+    default void generateStream(String prompt, Consumer<String> chunkConsumer) {
+        chunkConsumer.accept(generate(prompt));
     }
 }

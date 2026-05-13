@@ -107,12 +107,6 @@ public class ChatController {
         }
     }
 
-    // TODO: remove after verifying Sentry is working
-    @GetMapping("/debug/sentry-test")
-    public void sentryTest() {
-        throw new RuntimeException("Sentry test — podés borrar este endpoint");
-    }
-
     private void sse(PrintWriter writer, String data) throws IOException {
         writer.write("data:" + data + "\n\n");
         writer.flush();

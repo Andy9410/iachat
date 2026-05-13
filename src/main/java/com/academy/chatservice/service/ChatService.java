@@ -38,6 +38,37 @@ public class ChatService {
         this.contextProps = contextProps;
     }
 
+    public record StreamPrep(Long conversationId, String prompt) {}
+
+    @Transactional
+    public StreamPrep prepareStream(ChatRequest request, String userEmail) {
+        var text = request.message().trim();
+        if (text.isBlank()) {
+            throw new IllegalArgumentException("El mensaje no puede estar vacío");
+        }
+
+        var conversation = resolveConversation(request.conversationId(), text, userEmail);
+
+        long messageCount = messageRepository.countByConversationId(conversation.getId());
+        compactIfNeeded(conversation, messageCount);
+
+        String vectorStr = toVectorString(embeddingClient.embed(text));
+        saveUserMessage(conversation, text, vectorStr);
+
+        var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
+        var window = getWindow(conversation.getId(), contextProps.windowSize());
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar);
+
+        return new StreamPrep(conversation.getId(), prompt);
+    }
+
+    @Transactional
+    public void finalizeStream(Long conversationId, String assistantResponse) {
+        var conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+        saveMessage(conversation, Message.Role.assistant, assistantResponse);
+    }
+
     @Transactional
     public ChatResponse process(ChatRequest request, String userEmail) {
         var text = request.message().trim();

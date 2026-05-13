@@ -151,6 +151,33 @@ public class ChatService {
     }
 
     @Transactional
+    public String generateTitle(Long conversationId, String userEmail) {
+        Conversation conversation = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+
+        String firstMessage = messageRepository.findFirstN(conversationId, 1).stream()
+                .filter(m -> m.getRole() == Message.Role.user)
+                .findFirst()
+                .map(Message::getContent)
+                .orElse("");
+
+        if (firstMessage.isBlank()) return conversation.getTitle();
+
+        String prompt = "Genera un título de 2 a 6 palabras en español para una conversación que empieza con: \""
+                + firstMessage + "\". Responde solo con el título, sin comillas ni puntuación final.";
+
+        String raw = llmClient.generate(prompt).trim().replaceAll("[\"'.,;!?]", "");
+        String[] words = raw.split("\\s+");
+        String title = words.length > 6
+                ? String.join(" ", java.util.Arrays.copyOfRange(words, 0, 6))
+                : raw;
+
+        conversation.setTitle(title);
+        conversationRepository.save(conversation);
+        return title;
+    }
+
+    @Transactional
     public void deleteConversation(Long conversationId, String userEmail) {
         Conversation conv = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));

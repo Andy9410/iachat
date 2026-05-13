@@ -57,6 +57,14 @@ public class ChatController {
         return ResponseEntity.ok(chatService.getConversationMessages(id, userEmail));
     }
 
+    @PostMapping("/api/conversations/{id}/title")
+    public ResponseEntity<Map<String, String>> generateTitle(
+            @PathVariable Long id,
+            @AuthenticationPrincipal String userEmail) {
+        String title = chatService.generateTitle(id, userEmail);
+        return ResponseEntity.ok(Map.of("title", title));
+    }
+
     @DeleteMapping("/api/conversations/{id}")
     public ResponseEntity<Void> deleteConversation(
             @PathVariable Long id,

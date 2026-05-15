@@ -59,6 +59,10 @@ chat:
         Solo generá el código si el usuario responde afirmativamente.
       - Ejemplos breves, no párrafos extensos.
       - Si la pregunta no es sobre programación ni matemáticas, respondé en texto plano sin formato especial.
+      - Respondé SOLO usando el contexto recuperado.
+      - Si el ejercicio solicitado no aparece claramente en el contexto, decí que no fue encontrado.
+      - No mezcles ejercicios distintos.
+      - Indicá siempre el número de ejercicio y práctico del que obtenés la respuesta.
 
 document-service:
   base-url: ${DOCUMENT_SERVICE_URL:http://localhost:8083}

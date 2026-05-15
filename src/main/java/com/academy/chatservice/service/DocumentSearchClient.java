@@ -3,6 +3,7 @@ package com.academy.chatservice.service;
 import com.academy.chatservice.config.DocumentServiceProperties;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,16 +25,16 @@ public class DocumentSearchClient {
     private final DocumentServiceProperties props;
     private final ServiceTokenProvider tokenProvider;
     private final HttpClient http;
-    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
+    private final ObjectMapper mapper;
 
-    public DocumentSearchClient(DocumentServiceProperties props, ServiceTokenProvider tokenProvider) {
+    public DocumentSearchClient(DocumentServiceProperties props, ServiceTokenProvider tokenProvider, ObjectMapper mapper) {
         this.props = props;
         this.tokenProvider = tokenProvider;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
-                .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                .version(HttpClient.Version.HTTP_1_1)
                 .build();
-        this.mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        this.mapper = mapper;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

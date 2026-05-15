@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 public class ChatController {
@@ -105,7 +104,7 @@ public class ChatController {
                 var files = prep.docChunks().stream()
                         .map(c -> c.filename())
                         .distinct()
-                        .collect(Collectors.toList());
+                        .toList();
                 sse(writer, objectMapper.writeValueAsString(Map.of("type", "sources", "files", files)));
             }
 

@@ -60,6 +60,12 @@ chat:
       - Ejemplos breves, no párrafos extensos.
       - Si la pregunta no es sobre programación ni matemáticas, respondé en texto plano sin formato especial.
 
+document-service:
+  base-url: ${DOCUMENT_SERVICE_URL:http://localhost:8083}
+  top-k: ${DOCUMENT_SERVICE_TOP_K:5}
+  similarity-threshold: ${DOCUMENT_SERVICE_SIMILARITY_THRESHOLD:0.72}
+  enabled: ${DOCUMENT_SERVICE_ENABLED:true}
+
 jwt:
   secret: ${JWT_SECRET:}
 

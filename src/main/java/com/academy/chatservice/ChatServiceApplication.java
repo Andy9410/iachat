@@ -2,6 +2,7 @@ package com.academy.chatservice;
 
 import com.academy.chatservice.config.ChatContextProperties;
 import com.academy.chatservice.config.CloudflareProperties;
+import com.academy.chatservice.config.DocumentServiceProperties;
 import com.academy.chatservice.config.GroqProperties;
 import com.academy.chatservice.config.OllamaProperties;
 import org.springframework.boot.SpringApplication;
@@ -9,7 +10,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({OllamaProperties.class, ChatContextProperties.class, GroqProperties.class, CloudflareProperties.class})
+@EnableConfigurationProperties({OllamaProperties.class, ChatContextProperties.class, GroqProperties.class, CloudflareProperties.class, DocumentServiceProperties.class})
 
 public class ChatServiceApplication {
 

@@ -23,22 +23,25 @@ public class ChatService {
     private final MessageRepository messageRepository;
     private final MessageEmbeddingRepository messageEmbeddingRepository;
     private final ChatContextProperties contextProps;
+    private final DocumentSearchClient documentSearchClient;
 
     public ChatService(LLMClient llmClient,
                        EmbeddingClient embeddingClient,
                        ConversationRepository conversationRepository,
                        MessageRepository messageRepository,
                        MessageEmbeddingRepository messageEmbeddingRepository,
-                       ChatContextProperties contextProps) {
+                       ChatContextProperties contextProps,
+                       DocumentSearchClient documentSearchClient) {
         this.llmClient = llmClient;
         this.embeddingClient = embeddingClient;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.messageEmbeddingRepository = messageEmbeddingRepository;
         this.contextProps = contextProps;
+        this.documentSearchClient = documentSearchClient;
     }
 
-    public record StreamPrep(Long conversationId, String prompt) {}
+    public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks) {}
 
     @Transactional
     public StreamPrep prepareStream(ChatRequest request, String userEmail) {
@@ -57,9 +60,10 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        String prompt = buildPrompt(text, conversation.getSummary(), window, similar);
+        var docChunks = documentSearchClient.search(text, userEmail);
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail);
 
-        return new StreamPrep(conversation.getId(), prompt);
+        return new StreamPrep(conversation.getId(), prompt, docChunks);
     }
 
     @Transactional
@@ -87,7 +91,8 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar));
+        var docChunks = documentSearchClient.search(text, userEmail);
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -208,9 +213,20 @@ public class ChatService {
     }
 
     private String buildPrompt(String userMessage, String summary, List<Message> window,
-                               List<SimilarMessageProjection> similar) {
+                               List<SimilarMessageProjection> similar,
+                               List<DocumentSearchClient.DocumentChunk> docChunks,
+                               String userEmail) {
         var sb = new StringBuilder();
         sb.append(contextProps.systemPrompt()).append("\n");
+
+        if (!docChunks.isEmpty()) {
+            sb.append("\nMaterial de estudio relevante del estudiante:\n");
+            for (var chunk : docChunks) {
+                sb.append("— [").append(chunk.filename());
+                if (chunk.pageNumber() != null) sb.append(", p.").append(chunk.pageNumber());
+                sb.append("] ").append(chunk.chunkText()).append("\n");
+            }
+        }
 
         if (!similar.isEmpty()) {
             sb.append("\nContexto relevante de otras conversaciones:\n");

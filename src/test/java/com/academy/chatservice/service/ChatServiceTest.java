@@ -31,6 +31,7 @@ class ChatServiceTest {
     @Mock private ConversationRepository conversationRepository;
     @Mock private MessageRepository messageRepository;
     @Mock private MessageEmbeddingRepository messageEmbeddingRepository;
+    @Mock private DocumentSearchClient documentSearchClient;
 
     private ChatService chatService;
 
@@ -41,8 +42,9 @@ class ChatServiceTest {
     void setUp() {
         lenient().when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
         lenient().when(messageEmbeddingRepository.findSimilar(anyString(), anyString(), anyLong(), anyInt())).thenReturn(List.of());
+        lenient().when(documentSearchClient.search(anyString(), anyString())).thenReturn(List.of());
         chatService = new ChatService(llmClient, embeddingClient, conversationRepository,
-                messageRepository, messageEmbeddingRepository, contextProps);
+                messageRepository, messageEmbeddingRepository, contextProps, documentSearchClient);
     }
 
     @Test

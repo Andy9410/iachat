@@ -9,10 +9,6 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
-/**
- * Genera un JWT de larga duración para llamadas internas entre servicios.
- * Usa el mismo JWT_SECRET que el frontend/auth para que document-service pueda validarlo.
- */
 @Component
 public class ServiceTokenProvider {
 

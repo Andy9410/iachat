@@ -33,7 +33,7 @@ services:
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
       JWT_SECRET: ${JWT_SECRET}
       SEARCH_TOP_K: 8
-      SIMILARITY_THRESHOLD: 0.72
+      SIMILARITY_THRESHOLD: 0.45
     depends_on:
       postgres:
         condition: service_healthy

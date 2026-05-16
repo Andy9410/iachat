@@ -42,7 +42,7 @@ class ChatServiceTest {
     void setUp() {
         lenient().when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
         lenient().when(messageEmbeddingRepository.findSimilar(anyString(), anyString(), anyLong(), anyInt())).thenReturn(List.of());
-        lenient().when(documentSearchClient.search(anyString(), anyString())).thenReturn(List.of());
+        lenient().when(documentSearchClient.search(anyString(), anyString(), any())).thenReturn(List.of());
         chatService = new ChatService(llmClient, embeddingClient, conversationRepository,
                 messageRepository, messageEmbeddingRepository, contextProps, documentSearchClient);
     }
@@ -53,7 +53,7 @@ class ChatServiceTest {
         when(conversationRepository.save(any())).thenReturn(conv);
         when(llmClient.generate(anyString())).thenReturn("Respuesta del LLM");
 
-        var response = chatService.process(new ChatRequest("¿Qué es Java?", null), USER_EMAIL);
+        var response = chatService.process(new ChatRequest("¿Qué es Java?", null, null), USER_EMAIL);
 
         assertThat(response.response()).isEqualTo("Respuesta del LLM");
         assertThat(response.conversationId()).isEqualTo(1L);
@@ -67,7 +67,7 @@ class ChatServiceTest {
         when(conversationRepository.findByIdAndUserEmail(42L, USER_EMAIL)).thenReturn(Optional.of(conv));
         when(llmClient.generate(anyString())).thenReturn("ok");
 
-        var response = chatService.process(new ChatRequest("¿Qué es herencia?", 42L), USER_EMAIL);
+        var response = chatService.process(new ChatRequest("¿Qué es herencia?", 42L, null), USER_EMAIL);
 
         assertThat(response.conversationId()).isEqualTo(42L);
         verify(conversationRepository, never()).save(any());
@@ -77,7 +77,7 @@ class ChatServiceTest {
     void process_conConversacionInexistente_lanzaExcepcion() {
         when(conversationRepository.findByIdAndUserEmail(99L, USER_EMAIL)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> chatService.process(new ChatRequest("hola", 99L), USER_EMAIL))
+        assertThatThrownBy(() -> chatService.process(new ChatRequest("hola", 99L, null), USER_EMAIL))
                 .isInstanceOf(ResponseStatusException.class);
     }
 
@@ -87,7 +87,7 @@ class ChatServiceTest {
         when(conversationRepository.save(any())).thenReturn(conv);
         when(llmClient.generate(anyString())).thenReturn("ok");
 
-        chatService.process(new ChatRequest("¿Qué es un bucle?", null), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es un bucle?", null, null), USER_EMAIL);
 
         var captor = ArgumentCaptor.forClass(String.class);
         verify(llmClient).generate(captor.capture());
@@ -96,7 +96,7 @@ class ChatServiceTest {
 
     @Test
     void process_conMensajeSoloEspacios_lanzaExcepcion() {
-        assertThatThrownBy(() -> chatService.process(new ChatRequest("   ", null), USER_EMAIL))
+        assertThatThrownBy(() -> chatService.process(new ChatRequest("   ", null, null), USER_EMAIL))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("El mensaje no puede estar vacío");
     }
@@ -107,7 +107,7 @@ class ChatServiceTest {
         when(conversationRepository.save(any())).thenReturn(conv);
         when(llmClient.generate(anyString())).thenReturn("ok");
 
-        chatService.process(new ChatRequest("  ¿Qué es un objeto?  ", null), USER_EMAIL);
+        chatService.process(new ChatRequest("  ¿Qué es un objeto?  ", null, null), USER_EMAIL);
 
         var captor = ArgumentCaptor.forClass(String.class);
         verify(llmClient).generate(captor.capture());
@@ -125,7 +125,7 @@ class ChatServiceTest {
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen generado", "respuesta del tutor");
 
-        var response = chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
+        var response = chatService.process(new ChatRequest("pregunta", 10L, null), USER_EMAIL);
 
         verify(llmClient, times(2)).generate(anyString());
         verify(conv).setSummary("resumen generado");
@@ -140,7 +140,7 @@ class ChatServiceTest {
         when(messageRepository.countByConversationId(10L)).thenReturn(6L);
         when(llmClient.generate(anyString())).thenReturn("respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
+        chatService.process(new ChatRequest("pregunta", 10L, null), USER_EMAIL);
 
         verify(llmClient, times(1)).generate(anyString());
         verify(conversationRepository, never()).save(any());
@@ -153,7 +153,7 @@ class ChatServiceTest {
         when(messageRepository.countByConversationId(10L)).thenReturn(4L);
         when(llmClient.generate(anyString())).thenReturn("respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
+        chatService.process(new ChatRequest("pregunta", 10L, null), USER_EMAIL);
 
         verify(llmClient, times(1)).generate(anyString());
         verify(conversationRepository, never()).save(any());
@@ -168,7 +168,7 @@ class ChatServiceTest {
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen actualizado", "respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
+        chatService.process(new ChatRequest("pregunta", 10L, null), USER_EMAIL);
 
         verify(llmClient, times(2)).generate(anyString());
         verify(conv).setSummary("resumen actualizado");
@@ -187,7 +187,7 @@ class ChatServiceTest {
         when(messageRepository.findLastN(eq(10L), eq(4))).thenReturn(List.of());
         when(llmClient.generate(anyString())).thenReturn("resumen", "respuesta");
 
-        chatService.process(new ChatRequest("pregunta", 10L), USER_EMAIL);
+        chatService.process(new ChatRequest("pregunta", 10L, null), USER_EMAIL);
 
         var captor = ArgumentCaptor.forClass(String.class);
         verify(llmClient, times(2)).generate(captor.capture());

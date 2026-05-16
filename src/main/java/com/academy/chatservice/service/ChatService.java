@@ -60,7 +60,7 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var docChunks = documentSearchClient.search(text, userEmail);
+        var docChunks = documentSearchClient.search(text, userEmail, request.preferredDocumentId());
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks);
@@ -91,7 +91,7 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var docChunks = documentSearchClient.search(text, userEmail);
+        var docChunks = documentSearchClient.search(text, userEmail, request.preferredDocumentId());
         var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);

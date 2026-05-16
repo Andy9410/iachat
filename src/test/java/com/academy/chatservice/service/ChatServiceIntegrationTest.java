@@ -46,7 +46,7 @@ class ChatServiceIntegrationTest {
     }
 
     private Long startConversation(String firstMessage) {
-        var r = chatService.process(new ChatRequest(firstMessage, null), USER_EMAIL);
+        var r = chatService.process(new ChatRequest(firstMessage, null, null), USER_EMAIL);
         createdIds.add(r.conversationId());
         return r.conversationId();
     }
@@ -58,10 +58,10 @@ class ChatServiceIntegrationTest {
                 .thenReturn("Resumen: POO incluye herencia, encapsulación e interfaces.");
 
         Long id = startConversation("¿Qué es POO?");
-        chatService.process(new ChatRequest("¿Qué es herencia?",    id), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es interfaz?",    id), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es polimorfismo?",  id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es herencia?",    id, null), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es interfaz?",    id, null), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es encapsulación?", id, null), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es polimorfismo?",  id, null), USER_EMAIL);
 
         var conv = conversationRepository.findById(id).orElseThrow();
         assertThat(conv.getSummary())
@@ -74,9 +74,9 @@ class ChatServiceIntegrationTest {
         when(llmClient.generate(anyString())).thenReturn("Respuesta");
 
         Long id = startConversation("¿Qué es POO?");
-        chatService.process(new ChatRequest("¿Qué es herencia?",      id), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es interfaz?",      id), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es herencia?",      id, null), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es interfaz?",      id, null), USER_EMAIL);
+        chatService.process(new ChatRequest("¿Qué es encapsulación?", id, null), USER_EMAIL);
 
         var conv = conversationRepository.findById(id).orElseThrow();
         assertThat(conv.getSummary()).isNull();
@@ -90,7 +90,7 @@ class ChatServiceIntegrationTest {
 
         Long id = startConversation("pregunta 1");
         for (int i = 2; i <= 6; i++) {
-            chatService.process(new ChatRequest("pregunta " + i, id), USER_EMAIL);
+            chatService.process(new ChatRequest("pregunta " + i, id, null), USER_EMAIL);
         }
 
         var conv = conversationRepository.findById(id).orElseThrow();

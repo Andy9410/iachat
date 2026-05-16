@@ -61,7 +61,9 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var searchResult = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
+        var searchResult = request.preferredDocumentId() != null
+                ? documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId())
+                : DocumentSearchClient.SearchResult.empty();
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);
@@ -99,7 +101,9 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var searchResult = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
+        var searchResult = request.preferredDocumentId() != null
+                ? documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId())
+                : DocumentSearchClient.SearchResult.empty();
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);

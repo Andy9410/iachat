@@ -48,7 +48,7 @@ class ChatControllerTest {
     @Test
     @WithMockUser
     void chat_conMensajeValido_debeRetornarRespuesta() throws Exception {
-        var request  = new ChatRequest("¿Qué es una variable?", null);
+        var request  = new ChatRequest("¿Qué es una variable?", null, null);
         var response = new ChatResponse("Una variable es un espacio en memoria...", 1L);
 
         when(chatService.process(eq(request), any())).thenReturn(response);
@@ -64,7 +64,7 @@ class ChatControllerTest {
     @Test
     @WithMockUser
     void chat_conConversacionExistente_debeRetornarMismoId() throws Exception {
-        var request  = new ChatRequest("¿Qué es herencia?", 5L);
+        var request  = new ChatRequest("¿Qué es herencia?", 5L, null);
         var response = new ChatResponse("La herencia es...", 5L);
 
         when(chatService.process(eq(request), any())).thenReturn(response);

@@ -51,15 +51,17 @@ public class DocumentSearchClient {
             @JsonProperty("found") int found
     ) {}
 
-    public List<DocumentChunk> search(String query, String userEmail) {
+    public List<DocumentChunk> search(String query, String userEmail, Long preferredDocumentId) {
         if (!props.enabled()) return Collections.emptyList();
 
         try {
-            String body = mapper.writeValueAsString(Map.of(
+            var bodyMap = new java.util.HashMap<String, Object>(Map.of(
                     "query", query,
                     "user_email", userEmail,
                     "top_k", props.topK(),
                     "similarity_threshold", props.similarityThreshold()));
+            if (preferredDocumentId != null) bodyMap.put("preferred_document_id", preferredDocumentId);
+            String body = mapper.writeValueAsString(bodyMap);
 
             log.info("[RAG] Searching docs for user={} body={}", userEmail, body);
 

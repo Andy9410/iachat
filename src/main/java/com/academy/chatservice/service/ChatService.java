@@ -41,7 +41,7 @@ public class ChatService {
         this.documentSearchClient = documentSearchClient;
     }
 
-    public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks) {}
+    public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks, String clarificationMessage) {}
 
     @Transactional
     public StreamPrep prepareStream(ChatRequest request, String userEmail) {
@@ -61,10 +61,16 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var docChunks = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
+        var searchResult = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
+        if (searchResult.ambiguous()) {
+            String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
+            saveMessage(conversation, Message.Role.assistant, msg);
+            return new StreamPrep(conversation.getId(), null, Collections.emptyList(), msg);
+        }
+        var docChunks = searchResult.chunks();
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail);
 
-        return new StreamPrep(conversation.getId(), prompt, docChunks);
+        return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
 
     @Transactional
@@ -93,7 +99,13 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var docChunks = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
+        var searchResult = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
+        if (searchResult.ambiguous()) {
+            String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
+            saveMessage(conversation, Message.Role.assistant, msg);
+            return new ChatResponse(msg, conversation.getId());
+        }
+        var docChunks = searchResult.chunks();
         var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
@@ -251,6 +263,20 @@ public class ChatService {
         }
 
         sb.append("\nPregunta del estudiante: ").append(userMessage);
+        return sb.toString();
+    }
+
+    private String buildAmbiguityMessage(String exerciseRef, List<String> documentNames) {
+        var sb = new StringBuilder();
+        if (exerciseRef != null) {
+            sb.append("Encontré \"").append(exerciseRef).append("\" en múltiples documentos.");
+        } else {
+            sb.append("Encontré el ejercicio en múltiples documentos.");
+        }
+        sb.append(" ¿De cuál querés que lo resuelva?\n\n");
+        for (String name : documentNames) {
+            sb.append("- ").append(name).append("\n");
+        }
         return sb.toString();
     }
 

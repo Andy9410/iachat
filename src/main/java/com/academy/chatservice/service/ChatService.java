@@ -55,12 +55,13 @@ public class ChatService {
         long messageCount = messageRepository.countByConversationId(conversation.getId());
         compactIfNeeded(conversation, messageCount);
 
+        var priorWindow = getWindow(conversation.getId(), 2);
         String vectorStr = toVectorString(embeddingClient.embed(text));
         saveUserMessage(conversation, text, vectorStr);
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var docChunks = documentSearchClient.search(text, userEmail, request.preferredDocumentId());
+        var docChunks = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks);
@@ -86,12 +87,13 @@ public class ChatService {
         long messageCount = messageRepository.countByConversationId(conversation.getId());
         compactIfNeeded(conversation, messageCount);
 
+        var priorWindow = getWindow(conversation.getId(), 2);
         String vectorStr = toVectorString(embeddingClient.embed(text));
         saveUserMessage(conversation, text, vectorStr);
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var docChunks = documentSearchClient.search(text, userEmail, request.preferredDocumentId());
+        var docChunks = documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId());
         var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
@@ -250,6 +252,16 @@ public class ChatService {
 
         sb.append("\nPregunta del estudiante: ").append(userMessage);
         return sb.toString();
+    }
+
+    private String buildSearchQuery(String text, List<Message> priorWindow) {
+        if (text.length() >= 40) return text;
+        String lastUserMsg = priorWindow.stream()
+                .filter(m -> m.getRole() == Message.Role.user)
+                .reduce((a, b) -> b)
+                .map(Message::getContent)
+                .orElse("");
+        return lastUserMsg.isBlank() ? text : lastUserMsg + " " + text;
     }
 
     private String buildSummaryPrompt(String existingSummary, List<Message> messages) {

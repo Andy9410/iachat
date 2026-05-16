@@ -88,6 +88,12 @@ public class ChatController {
             sse(writer, objectMapper.writeValueAsString(
                     Map.of("type", "meta", "conversationId", prep.conversationId())));
 
+            if (prep.clarificationMessage() != null) {
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", prep.clarificationMessage())));
+                sse(writer, "{\"type\":\"done\"}");
+                return;
+            }
+
             var full = new StringBuilder();
             llmClient.generateStream(prep.prompt(), chunk -> {
                 full.append(chunk);

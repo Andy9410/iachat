@@ -45,14 +45,28 @@ public class DocumentSearchClient {
             @JsonProperty("similarity") double similarity
     ) {}
 
+    public record SearchResult(
+            List<DocumentChunk> chunks,
+            boolean ambiguous,
+            List<String> ambiguousDocuments,
+            String exerciseRef
+    ) {
+        public static SearchResult empty() {
+            return new SearchResult(Collections.emptyList(), false, Collections.emptyList(), null);
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record SearchResponse(
+    private record SearchApiResponse(
             @JsonProperty("results") List<DocumentChunk> results,
-            @JsonProperty("found") int found
+            @JsonProperty("found") int found,
+            @JsonProperty("ambiguous") boolean ambiguous,
+            @JsonProperty("ambiguous_documents") List<String> ambiguousDocuments,
+            @JsonProperty("exercise_ref") String exerciseRef
     ) {}
 
-    public List<DocumentChunk> search(String query, String userEmail, Long preferredDocumentId) {
-        if (!props.enabled()) return Collections.emptyList();
+    public SearchResult search(String query, String userEmail, Long preferredDocumentId) {
+        if (!props.enabled()) return SearchResult.empty();
 
         try {
             var bodyMap = new java.util.HashMap<String, Object>(Map.of(
@@ -78,16 +92,20 @@ public class DocumentSearchClient {
             log.info("[RAG] document-service status={} body={}", response.statusCode(), response.body().substring(0, Math.min(200, response.body().length())));
 
             if (response.statusCode() != 200) {
-                return Collections.emptyList();
+                return SearchResult.empty();
             }
 
-            List<DocumentChunk> results = mapper.readValue(response.body(), SearchResponse.class).results();
-            log.info("[RAG] Found {} chunks", results.size());
-            return results;
+            var parsed = mapper.readValue(response.body(), SearchApiResponse.class);
+            if (parsed.ambiguous()) {
+                log.info("[RAG] Ambiguous: {} docs for '{}'", parsed.ambiguousDocuments().size(), parsed.exerciseRef());
+                return new SearchResult(Collections.emptyList(), true, parsed.ambiguousDocuments(), parsed.exerciseRef());
+            }
+            log.info("[RAG] Found {} chunks", parsed.results().size());
+            return new SearchResult(parsed.results(), false, Collections.emptyList(), null);
 
         } catch (Exception e) {
             log.warn("[RAG] Exception: {}", e.getMessage(), e);
-            return Collections.emptyList();
+            return SearchResult.empty();
         }
     }
 }

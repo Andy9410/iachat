@@ -67,7 +67,7 @@ chat:
 document-service:
   base-url: ${DOCUMENT_SERVICE_URL:http://localhost:8083}
   top-k: ${DOCUMENT_SERVICE_TOP_K:8}
-  similarity-threshold: ${DOCUMENT_SERVICE_SIMILARITY_THRESHOLD:0.72}
+  similarity-threshold: ${DOCUMENT_SERVICE_SIMILARITY_THRESHOLD:0.45}
   enabled: ${DOCUMENT_SERVICE_ENABLED:true}
 
 jwt:

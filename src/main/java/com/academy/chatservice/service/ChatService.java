@@ -5,6 +5,8 @@ import com.academy.chatservice.model.*;
 import com.academy.chatservice.repository.ConversationRepository;
 import com.academy.chatservice.repository.MessageEmbeddingRepository;
 import com.academy.chatservice.repository.MessageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +18,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class ChatService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
     private final LLMClient llmClient;
     private final EmbeddingClient embeddingClient;
@@ -62,7 +66,7 @@ public class ChatService {
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
         var searchResult = request.preferredDocumentId() != null
-                ? documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId())
+                ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, request.preferredDocumentId())
                 : DocumentSearchClient.SearchResult.empty();
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
@@ -102,7 +106,7 @@ public class ChatService {
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
         var searchResult = request.preferredDocumentId() != null
-                ? documentSearchClient.search(buildSearchQuery(text, priorWindow), userEmail, request.preferredDocumentId())
+                ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, request.preferredDocumentId())
                 : DocumentSearchClient.SearchResult.empty();
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
@@ -282,6 +286,22 @@ public class ChatService {
             sb.append("- ").append(name).append("\n");
         }
         return sb.toString();
+    }
+
+    private String buildHydeQuery(String text, List<Message> priorWindow) {
+        String base = buildSearchQuery(text, priorWindow);
+        try {
+            String hydePrompt = "Responde en 2 oraciones técnicas y concisas a: \"" + base
+                    + "\". Solo el contenido técnico, sin saludos ni explicaciones adicionales.";
+            String hypothetical = llmClient.generate(hydePrompt).trim();
+            if (!hypothetical.isBlank()) {
+                log.info("[HyDE] query='{}' → hypothetical='{}'", base, hypothetical.substring(0, Math.min(80, hypothetical.length())));
+                return hypothetical;
+            }
+        } catch (Exception e) {
+            log.warn("[HyDE] LLM call failed, using original query: {}", e.getMessage());
+        }
+        return base;
     }
 
     private String buildSearchQuery(String text, List<Message> priorWindow) {

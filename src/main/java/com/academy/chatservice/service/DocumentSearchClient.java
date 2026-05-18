@@ -56,6 +56,63 @@ public class DocumentSearchClient {
         }
     }
 
+    // NUEVO: búsqueda global sobre todos los documentos del usuario
+    public SearchResult searchAll(String query, String userEmail) {
+        try {
+            // Llama al servicio Python que busca por similitud SIN filtrar por document_id
+            var body = mapper.writeValueAsString(Map.of(
+                    "query", query,
+                    "user_email", userEmail,
+                    "top_k", 5
+            ));
+
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create(props.baseUrl() + "/documents/search"))  // endpoint Python
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + tokenProvider.getServiceToken())
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+
+            var response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                log.warn("DocumentSearch searchAll status={} body={}", response.statusCode(), response.body());
+                return SearchResult.empty();
+            }
+            // parseo a SearchResult... (mismo que en search())
+            return parseSearchResult(response.body());
+
+        } catch (Exception e) {
+            log.error("Error en searchAll: {}", e.getMessage(), e);
+            return SearchResult.empty();
+        }
+    }
+
+    private SearchResult parseSearchResult(String responseBody) throws Exception {
+        var parsed = mapper.readValue(responseBody, SearchApiResponse.class);
+
+        if (parsed.ambiguous()) {
+            log.info("[RAG] Ambiguous: {} docs for '{}'",
+                    parsed.ambiguousDocuments().size(),
+                    parsed.exerciseRef());
+
+            return new SearchResult(
+                    Collections.emptyList(),
+                    true,
+                    parsed.ambiguousDocuments(),
+                    parsed.exerciseRef()
+            );
+        }
+
+        log.info("[RAG] Found {} chunks", parsed.results().size());
+
+        return new SearchResult(
+                parsed.results(),
+                false,
+                Collections.emptyList(),
+                null
+        );
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record SearchApiResponse(
             @JsonProperty("results") List<DocumentChunk> results,

@@ -65,9 +65,20 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var searchResult = request.preferredDocumentId() != null
-                ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, request.preferredDocumentId())
+
+        String hydeQuery = buildHydeQuery(text, priorWindow);
+
+        Long docId = request.preferredDocumentId() != null
+                ? request.preferredDocumentId()
+                : conversation.getActiveDocumentId();
+
+        var searchResult = docId != null
+                ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, docId)
                 : DocumentSearchClient.SearchResult.empty();
+
+        log.info("[RAG] userEmail={} preferredDocId={} chunksFound={}",
+                userEmail, request.preferredDocumentId(), searchResult.chunks().size());
+
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);
@@ -105,9 +116,20 @@ public class ChatService {
 
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
-        var searchResult = request.preferredDocumentId() != null
-                ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, request.preferredDocumentId())
+
+        String hydeQuery = buildHydeQuery(text, priorWindow);
+
+        Long docId = request.preferredDocumentId() != null
+                ? request.preferredDocumentId()
+                : conversation.getActiveDocumentId();
+
+        var searchResult = docId != null
+                ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, docId)
                 : DocumentSearchClient.SearchResult.empty();
+
+        log.info("[RAG] userEmail={} preferredDocId={} chunksFound={}",
+                userEmail, request.preferredDocumentId(), searchResult.chunks().size());
+
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);
@@ -330,5 +352,13 @@ public class ChatService {
 
         sb.append("\nResumen:");
         return sb.toString();
+    }
+
+    @Transactional
+    public void setActiveDocument(Long conversationId, Long documentId, String userEmail) {
+        var conv = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        conv.setActiveDocumentId(documentId);
+        conversationRepository.save(conv);
     }
 }

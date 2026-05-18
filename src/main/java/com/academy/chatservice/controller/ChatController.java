@@ -127,4 +127,13 @@ public class ChatController {
         writer.flush();
         if (writer.checkError()) throw new IOException("client disconnected");
     }
+
+    @PostMapping("/api/conversations/{id}/active-document")
+    public ResponseEntity<Void> setActiveDocument(
+            @PathVariable Long id,
+            @RequestBody Map<String, Long> body,
+            @AuthenticationPrincipal String userEmail) {
+        chatService.setActiveDocument(id, body.get("documentId"), userEmail);
+        return ResponseEntity.noContent().build();
+    }
 }

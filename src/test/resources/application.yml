@@ -8,8 +8,14 @@ spring:
     hibernate:
       ddl-auto: create-drop
     database-platform: org.hibernate.dialect.H2Dialect
+  sql:
+    init:
+      mode: always
   flyway:
     enabled: false
+
+jwt:
+  secret: test-secret-key-for-testing-purposes-only-padded-to-256bits-minimum
 
 llm:
   provider: mock

@@ -1,4 +1,4 @@
-package com.academy.chatservice.service;
+    package com.academy.chatservice.service;
 
 import java.util.List;
 

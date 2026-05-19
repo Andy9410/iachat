@@ -39,7 +39,8 @@ public class GroqLLMClient implements LLMClient {
         try {
             var body = objectMapper.writeValueAsString(new GroqRequest(
                     props.model(),
-                    List.of(new Message("user", prompt))
+                    List.of(new Message("user", prompt)),
+                    false
             ));
 
             var request = HttpRequest.newBuilder()
@@ -69,6 +70,57 @@ public class GroqLLMClient implements LLMClient {
         }
     }
 
+    @Override
+    public void generateStream(String prompt, java.util.function.Consumer<String> onChunk) {
+        try {
+            var body = objectMapper.writeValueAsString(new GroqRequest(
+                    props.model(),
+                    List.of(new Message("user", prompt)),
+                    true
+            ));
+
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create(props.baseUrl() + "/openai/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + props.apiKey())
+                    .timeout(Duration.ofSeconds(props.requestTimeoutSeconds()))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+
+            var response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+
+            if (response.statusCode() != 200) {
+                log.error("Groq respondió con status {} en stream", response.statusCode());
+                throw new RuntimeException("Groq error: HTTP " + response.statusCode());
+            }
+
+            response.body().forEach(line -> {
+                if (!line.startsWith("data: ")) return;
+                String data = line.substring("data: ".length()).trim();
+                if ("[DONE]".equals(data)) return;
+                try {
+                    JsonNode json = objectMapper.readTree(data);
+                    JsonNode content = json.path("choices").get(0).path("delta").path("content");
+                    if (!content.isMissingNode() && !content.isNull()) {
+                        String text = content.asText();
+                        if (!text.isEmpty()) {
+                            onChunk.accept(text);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("No se pudo parsear chunk SSE de Groq: {}", data, e);
+                }
+            });
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Stream a Groq interrumpido", e);
+        } catch (Exception e) {
+            log.error("Error en stream a Groq: {}", e.getMessage(), e);
+            throw new RuntimeException("Error en stream a Groq", e);
+        }
+    }
+
     private record Message(String role, String content) {}
-    private record GroqRequest(String model, List<Message> messages) {}
+    private record GroqRequest(String model, List<Message> messages, boolean stream) {}
 }

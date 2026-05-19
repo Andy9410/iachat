@@ -1,40 +1,3 @@
-server:
-  port: 8080
-
-spring:
-  application:
-    name: chat-service
-  datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:ai_chat_db}?sslmode=${DB_SSL_MODE:disable}
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:postgres}
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    open-in-view: false
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
-
-llm:
-  provider: ${LLM_PROVIDER:groq}
-  ollama:
-    base-url: ${OLLAMA_URL:http://localhost:11434}
-    model: ${OLLAMA_MODEL:qwen2.5:14b}
-    connect-timeout-seconds: 10
-    request-timeout-seconds: 300
-  groq:
-    api-key: ${GROQ_API_KEY:}
-    model: ${GROQ_MODEL:llama-3.3-70b-versatile}
-    connect-timeout-seconds: 10
-    request-timeout-seconds: 60
-
-cloudflare:
-  account-id: ${CLOUDFLARE_ACCOUNT_ID:}
-  api-token: ${CLOUDFLARE_API_TOKEN:}
-  connect-timeout-seconds: 10
-  request-timeout-seconds: 30
-
 chat:
   context:
     window-size: 2
@@ -63,6 +26,12 @@ chat:
       - Si el ejercicio solicitado no aparece claramente en el contexto, decí que no fue encontrado.
       - No mezcles ejercicios distintos.
       - Indicá siempre el número de ejercicio y práctico del que obtenés la respuesta.
+      - Responde usando exclusivamente el contexto proporcionado.
+      - Si la respuesta no está en el contexto, indícalo claramente.
+      - Si hay ambigüedad en ejercicios o incisos, pide aclaración antes de responder.
+      - Explica de forma clara y paso a paso cuando sea necesario, priorizando la comprensión.
+      - Si hay múltiples posibles respuestas en el contexto, menciona brevemente las opciones antes de responder.
+      - Mantén un tono educativo, directo y conciso.
 
 document-service:
   base-url: ${DOCUMENT_SERVICE_URL:http://localhost:8083}
@@ -70,31 +39,5 @@ document-service:
   similarity-threshold: ${DOCUMENT_SERVICE_SIMILARITY_THRESHOLD:0.45}
   enabled: ${DOCUMENT_SERVICE_ENABLED:true}
 
-      Responde usando exclusivamente el contexto proporcionado.
-
-      Si la respuesta no está en el contexto, indícalo claramente.
-
-      Si hay ambigüedad en ejercicios o incisos, pide aclaración antes de responder.
-
-      Explica de forma clara y paso a paso cuando sea necesario, priorizando la comprensión.
-
-      Si hay múltiples posibles respuestas en el contexto, menciona brevemente las opciones antes de responder.
-
-      Mantén un tono educativo, directo y conciso.
 jwt:
   secret: ${JWT_SECRET:}
-
-cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health, info
-
-sentry:
-  dsn: https://c51a2fdf9cba5fa33cfcf70dac45a9ad@o4511384546377728.ingest.us.sentry.io/4511384635375616
-  environment: ${SENTRY_ENVIRONMENT:production}
-  send-default-pii: true
-  traces-sample-rate: 0.0

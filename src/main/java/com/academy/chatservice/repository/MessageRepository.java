@@ -18,4 +18,7 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     @Query("SELECT m FROM Message m WHERE m.conversation.id = :convId ORDER BY m.createdAt ASC LIMIT :limit")
     List<Message> findFirstN(@Param("convId") Long conversationId, @Param("limit") int limit);
+
+    @Query("SELECT m FROM Message m WHERE m.conversation.id = :convId AND m.id < :beforeId ORDER BY m.id DESC LIMIT :limit")
+    List<Message> findBeforeId(@Param("convId") Long conversationId, @Param("beforeId") Long beforeId, @Param("limit") int limit);
 }

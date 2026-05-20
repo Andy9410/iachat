@@ -157,14 +157,25 @@ public class ChatService {
     }
 
     @Transactional(readOnly = true)
-    public List<MessageDto> getConversationMessages(Long conversationId, String userEmail) {
+    public MessagePageDto getConversationMessages(Long conversationId, String userEmail, int limit, Long before) {
         conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
 
-        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId)
-                .stream()
+        int fetchLimit = limit + 1;
+        List<Message> raw = before != null
+                ? messageRepository.findBeforeId(conversationId, before, fetchLimit)
+                : messageRepository.findLastN(conversationId, fetchLimit);
+
+        boolean hasMore = raw.size() > limit;
+        List<Message> page = hasMore ? raw.subList(0, limit) : raw;
+
+        // findLastN / findBeforeId return DESC — reverse to chronological ASC
+        List<MessageDto> dtos = page.stream()
                 .map(m -> new MessageDto(m.getId(), m.getRole().name(), m.getContent(), m.getCreatedAt()))
                 .collect(Collectors.toList());
+        Collections.reverse(dtos);
+
+        return new MessagePageDto(dtos, hasMore);
     }
 
     @Transactional

@@ -52,10 +52,12 @@ public class ChatController {
     }
 
     @GetMapping("/api/conversations/{id}/messages")
-    public ResponseEntity<List<MessageDto>> conversationMessages(
+    public ResponseEntity<MessagePageDto> conversationMessages(
             @PathVariable Long id,
+            @RequestParam(defaultValue = "30") int limit,
+            @RequestParam(required = false) Long before,
             @AuthenticationPrincipal String userEmail) {
-        return ResponseEntity.ok(chatService.getConversationMessages(id, userEmail));
+        return ResponseEntity.ok(chatService.getConversationMessages(id, userEmail, limit, before));
     }
 
     @PostMapping("/api/conversations/{id}/title")

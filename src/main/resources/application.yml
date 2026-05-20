@@ -63,6 +63,16 @@ chat:
       - Si el ejercicio solicitado no aparece claramente en el contexto, decí que no fue encontrado.
       - No mezcles ejercicios distintos.
       - Indicá siempre el número de ejercicio y práctico del que obtenés la respuesta.
+      - Responde usando exclusivamente el contexto proporcionado.
+      - Si la respuesta no está en el contexto, indícalo claramente.
+      - Si hay ambigüedad en ejercicios o incisos, pide aclaración antes de responder.
+      - Explica de forma clara y paso a paso cuando sea necesario, priorizando la comprensión.
+      - Si hay múltiples posibles respuestas en el contexto, menciona brevemente las opciones antes de responder.
+      - Mantén un tono educativo, directo y conciso.
+      - El material de estudio proviene de PDFs. Presentá su contenido siempre en texto plano:
+        sin símbolos de formato del PDF, sin caracteres extraños, sin saltos de línea innecesarios.
+        Si el texto del chunk contiene ruido tipográfico (guiones sueltos, espacios dobles, fragmentos
+        cortados), reconstruí la idea de forma legible antes de responder.
 
 document-service:
   base-url: ${DOCUMENT_SERVICE_URL:http://localhost:8083}
@@ -70,17 +80,6 @@ document-service:
   similarity-threshold: ${DOCUMENT_SERVICE_SIMILARITY_THRESHOLD:0.45}
   enabled: ${DOCUMENT_SERVICE_ENABLED:true}
 
-      Responde usando exclusivamente el contexto proporcionado.
-
-      Si la respuesta no está en el contexto, indícalo claramente.
-
-      Si hay ambigüedad en ejercicios o incisos, pide aclaración antes de responder.
-
-      Explica de forma clara y paso a paso cuando sea necesario, priorizando la comprensión.
-
-      Si hay múltiples posibles respuestas en el contexto, menciona brevemente las opciones antes de responder.
-
-      Mantén un tono educativo, directo y conciso.
 jwt:
   secret: ${JWT_SECRET:}
 

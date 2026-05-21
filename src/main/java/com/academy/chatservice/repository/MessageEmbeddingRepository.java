@@ -25,7 +25,6 @@ public interface MessageEmbeddingRepository extends JpaRepository<MessageEmbeddi
             """, nativeQuery = true)
     List<SimilarMessageProjection> findSimilar(
             @Param("embedding") String embedding,
-            @Param("userEmail") String userEmail,
             @Param("conversationId") Long conversationId,
             @Param("topK") int topK);
 }

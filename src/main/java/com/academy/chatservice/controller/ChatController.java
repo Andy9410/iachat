@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 @RestController
 public class ChatController {
@@ -41,8 +42,13 @@ public class ChatController {
 
     @PostMapping("/chat")
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request,
-                                             @AuthenticationPrincipal String userEmail) {
-        return ResponseEntity.ok(chatService.process(request, userEmail));
+                                             @AuthenticationPrincipal Jwt jwt) {
+
+
+        String userEmail = jwt.getSubject();
+        String firstName = jwt.getClaim("firstName");
+
+        return ResponseEntity.ok(chatService.process(request, userEmail,firstName));
     }
 
     @GetMapping("/api/conversations")
@@ -78,15 +84,20 @@ public class ChatController {
 
     @PostMapping("/chat/stream")
     public void chatStream(@Valid @RequestBody ChatRequest request,
-                           @AuthenticationPrincipal String userEmail,
+                           @AuthenticationPrincipal Jwt jwt,
                            HttpServletResponse response) throws IOException {
         response.setContentType("text/event-stream;charset=UTF-8");
         response.setHeader("Cache-Control", "no-cache, no-transform");
         response.setHeader("X-Accel-Buffering", "no");
 
+
+        String userEmail = jwt.getSubject();
+        String firstName = jwt.getClaim("firstName");
+
+
         PrintWriter writer = response.getWriter();
         try {
-            var prep = chatService.prepareStream(request, userEmail);
+            var prep = chatService.prepareStream(request, userEmail, firstName);
             sse(writer, objectMapper.writeValueAsString(
                     Map.of("type", "meta", "conversationId", prep.conversationId())));
 

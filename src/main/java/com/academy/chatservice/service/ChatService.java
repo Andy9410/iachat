@@ -48,7 +48,7 @@ public class ChatService {
     public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks, String clarificationMessage) {}
 
     @Transactional
-    public StreamPrep prepareStream(ChatRequest request, String userEmail) {
+    public StreamPrep prepareStream(ChatRequest request, String userEmail, String firstName) {
         var text = request.message().trim();
         if (text.isBlank()) {
             throw new IllegalArgumentException("El mensaje no puede estar vacío");
@@ -93,7 +93,7 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel());
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
@@ -106,7 +106,7 @@ public class ChatService {
     }
 
     @Transactional
-    public ChatResponse process(ChatRequest request, String userEmail) {
+    public ChatResponse process(ChatRequest request, String userEmail, String firstName) {
         var text = request.message().trim();
 
         if (text.isBlank()) {
@@ -151,7 +151,7 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel()));
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -325,9 +325,21 @@ public class ChatService {
                                List<DocumentSearchClient.DocumentChunk> docChunks,
                                Long activeDocId,
                                String userEmail,
-                               Integer explanationLevel) {
+                               Integer explanationLevel, String firstName ) {
+        String personalization = """
+            [SISTEMA]
+            El nombre del estudiante es %s.
+            
+            - Usá su nombre ocasionalmente.
+            - Especialmente en saludos o explicaciones importantes.
+            - No uses el nombre en todas las respuestas.
+            - Mantené un tono natural y humano.
+            """.formatted(firstName);
+
+
         var sb = new StringBuilder();
         sb.append(contextProps.systemPrompt()).append("\n");
+        sb.append(personalization).append("\n");
 
         if (!docChunks.isEmpty()) {
             sb.append("\nMaterial de estudio del documento activo:\n");

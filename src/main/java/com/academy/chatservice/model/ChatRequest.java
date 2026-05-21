@@ -6,5 +6,6 @@ public record ChatRequest(
         @NotBlank(message = "El mensaje no puede estar vacío")
         String message,
         Long conversationId,
-        Long preferredDocumentId
+        Long preferredDocumentId,
+        Integer explanationLevel
 ) {}

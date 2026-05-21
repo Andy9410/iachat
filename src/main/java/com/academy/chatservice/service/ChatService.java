@@ -66,7 +66,12 @@ public class ChatService {
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
 
-        String hydeQuery = buildHydeQuery(text, priorWindow);
+        // Persist the active document on the conversation so it survives frontend session resets
+        if (request.preferredDocumentId() != null
+                && !request.preferredDocumentId().equals(conversation.getActiveDocumentId())) {
+            conversation.setActiveDocumentId(request.preferredDocumentId());
+            conversationRepository.save(conversation);
+        }
 
         Long docId = request.preferredDocumentId() != null
                 ? request.preferredDocumentId()
@@ -76,16 +81,19 @@ public class ChatService {
                 ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, docId)
                 : DocumentSearchClient.SearchResult.empty();
 
-        log.info("[RAG] userEmail={} preferredDocId={} chunksFound={}",
-                userEmail, request.preferredDocumentId(), searchResult.chunks().size());
-
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);
             return new StreamPrep(conversation.getId(), null, Collections.emptyList(), msg);
         }
+
         var docChunks = searchResult.chunks();
-        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail);
+        log.info("[RAG DEBUG] conversation_id={} user={} active_doc_id={} retrieved_chunks={} documents_used=[{}] scores=[{}]",
+                conversation.getId(), userEmail, docId, docChunks.size(),
+                docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
+                docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
+
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
@@ -117,7 +125,11 @@ public class ChatService {
         var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
 
-        String hydeQuery = buildHydeQuery(text, priorWindow);
+        if (request.preferredDocumentId() != null
+                && !request.preferredDocumentId().equals(conversation.getActiveDocumentId())) {
+            conversation.setActiveDocumentId(request.preferredDocumentId());
+            conversationRepository.save(conversation);
+        }
 
         Long docId = request.preferredDocumentId() != null
                 ? request.preferredDocumentId()
@@ -127,16 +139,19 @@ public class ChatService {
                 ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, docId)
                 : DocumentSearchClient.SearchResult.empty();
 
-        log.info("[RAG] userEmail={} preferredDocId={} chunksFound={}",
-                userEmail, request.preferredDocumentId(), searchResult.chunks().size());
-
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);
             return new ChatResponse(msg, conversation.getId());
         }
+
         var docChunks = searchResult.chunks();
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, userEmail));
+        log.info("[RAG DEBUG] conversation_id={} user={} active_doc_id={} retrieved_chunks={} documents_used=[{}] scores=[{}]",
+                conversation.getId(), userEmail, docId, docChunks.size(),
+                docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
+                docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
+
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -270,21 +285,29 @@ public class ChatService {
     private String buildPrompt(String userMessage, String summary, List<Message> window,
                                List<SimilarMessageProjection> similar,
                                List<DocumentSearchClient.DocumentChunk> docChunks,
+                               Long activeDocId,
                                String userEmail) {
         var sb = new StringBuilder();
         sb.append(contextProps.systemPrompt()).append("\n");
 
         if (!docChunks.isEmpty()) {
-            sb.append("\nMaterial de estudio relevante del estudiante:\n");
+            sb.append("\nMaterial de estudio del documento activo:\n");
             for (var chunk : docChunks) {
                 sb.append("— [").append(chunk.filename());
                 if (chunk.pageNumber() != null) sb.append(", p.").append(chunk.pageNumber());
                 sb.append("] ").append(chunk.chunkText()).append("\n");
             }
+        } else if (activeDocId != null) {
+            // Document was set but retrieval returned nothing — tell the model explicitly
+            sb.append("\n[SISTEMA: El usuario tiene un documento activo pero no se encontró " +
+                      "información relevante en él para esta pregunta. Si la respuesta requiere " +
+                      "contenido específico del documento, indicá: " +
+                      "\"No encontré información sobre esto en los documentos actuales.\" " +
+                      "No uses contexto de otros documentos.]\n");
         }
 
         if (!similar.isEmpty()) {
-            sb.append("\nContexto relevante de otras conversaciones:\n");
+            sb.append("\nContexto relevante de esta conversación:\n");
             for (var s : similar) {
                 String role = "user".equals(s.getRole()) ? "Estudiante" : "Tutor";
                 sb.append(role).append(": ").append(s.getContent()).append("\n");

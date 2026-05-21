@@ -9,14 +9,17 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
 import java.util.List;
 
 @Component
@@ -44,15 +47,30 @@ public class JwtFilter extends OncePerRequestFilter {
                     .parseSignedClaims(token)
                     .getPayload();
 
-            String email = claims.getSubject();
-            if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                var auth = new UsernamePasswordAuthenticationToken(email, null, List.of());
-                SecurityContextHolder.getContext().setAuthentication(auth);
-            }
+            // Crear objeto Jwt de Spring Security OAuth2
+            Jwt jwt = Jwt.withTokenValue(token)
+                    .header("alg", "HS256")
+                    .header("typ", "JWT")
+                    .subject(claims.getSubject())
+                    .claim("role", claims.get("role"))
+                    .claim("firstName", claims.get("firstName"))
+                    .claim("jti", claims.getId())  // ← jti como claim, no como método .id()
+                    .issuedAt(instantFromDate(claims.getIssuedAt()))
+                    .expiresAt(instantFromDate(claims.getExpiration()))
+                    .build();
+
+            // Crear JwtAuthenticationToken (esto permite @AuthenticationPrincipal Jwt)
+            var auth = new JwtAuthenticationToken(jwt, List.of());
+            SecurityContextHolder.getContext().setAuthentication(auth);
+
         } catch (JwtException ignored) {
             // Token inválido — la capa de autorización rechazará la petición
         }
 
         chain.doFilter(request, response);
+    }
+
+    private Instant instantFromDate(Date date) {
+        return date != null ? date.toInstant() : null;
     }
 }

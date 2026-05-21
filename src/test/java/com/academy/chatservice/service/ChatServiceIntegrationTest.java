@@ -13,7 +13,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -23,20 +22,35 @@ import org.junit.jupiter.api.BeforeEach;
 class ChatServiceIntegrationTest {
 
     private static final String USER_EMAIL = "test@test.com";
+    private static final String FIRST_NAME = "Andy";
 
-    @MockBean private LLMClient llmClient;
-    @MockBean private EmbeddingClient embeddingClient;
-    @MockBean private com.academy.chatservice.repository.MessageEmbeddingRepository messageEmbeddingRepository;
+    @MockBean
+    private LLMClient llmClient;
 
-    @Autowired private ChatService chatService;
-    @Autowired private ConversationRepository conversationRepository;
+    @MockBean
+    private EmbeddingClient embeddingClient;
+
+    @MockBean
+    private com.academy.chatservice.repository.MessageEmbeddingRepository messageEmbeddingRepository;
+
+    @Autowired
+    private ChatService chatService;
+
+    @Autowired
+    private ConversationRepository conversationRepository;
 
     private final List<Long> createdIds = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1f, 0.2f, 0.3f));
-        when(messageEmbeddingRepository.findSimilar(anyString(), anyString(), anyLong(), anyInt())).thenReturn(List.of());
+        when(embeddingClient.embed(anyString()))
+                .thenReturn(List.of(0.1f, 0.2f, 0.3f));
+
+        when(messageEmbeddingRepository.findSimilar(
+                anyString(),
+                anyLong(),
+                anyInt()
+        )).thenReturn(List.of());
     }
 
     @AfterEach
@@ -46,54 +60,123 @@ class ChatServiceIntegrationTest {
     }
 
     private Long startConversation(String firstMessage) {
-        var r = chatService.process(new ChatRequest(firstMessage, null, null), USER_EMAIL);
+        var r = chatService.process(
+                new ChatRequest(firstMessage, null, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
+
         createdIds.add(r.conversationId());
+
         return r.conversationId();
     }
 
     @Test
     void compactacion_guarda_summary_en_BD_al_quinto_request() {
-        when(llmClient.generate(anyString())).thenReturn("Respuesta del tutor");
-        when(llmClient.generate(argThat(p -> p != null && p.startsWith("Resume"))))
-                .thenReturn("Resumen: POO incluye herencia, encapsulación e interfaces.");
+
+        when(llmClient.generate(argThat(
+                p -> p != null && p.startsWith("Resume")
+        ))).thenReturn(
+                "Resumen: POO incluye herencia, encapsulación e interfaces."
+        );
+
+        when(llmClient.generate(argThat(
+                p -> p != null && !p.startsWith("Resume")
+        ))).thenReturn("Respuesta del tutor");
 
         Long id = startConversation("¿Qué es POO?");
-        chatService.process(new ChatRequest("¿Qué es herencia?",    id, null), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es interfaz?",    id, null), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id, null), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es polimorfismo?",  id, null), USER_EMAIL);
+
+        chatService.process(
+                new ChatRequest("¿Qué es herencia?", id, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
+
+        chatService.process(
+                new ChatRequest("¿Qué es interfaz?", id, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
+
+        chatService.process(
+                new ChatRequest("¿Qué es encapsulación?", id, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
+
+        chatService.process(
+                new ChatRequest("¿Qué es polimorfismo?", id, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
 
         var conv = conversationRepository.findById(id).orElseThrow();
+
         assertThat(conv.getSummary())
                 .isNotNull()
-                .isEqualTo("Resumen: POO incluye herencia, encapsulación e interfaces.");
+                .isEqualTo(
+                        "Resumen: POO incluye herencia, encapsulación e interfaces."
+                );
     }
 
     @Test
     void compactacion_no_se_activa_con_cuatro_requests() {
-        when(llmClient.generate(anyString())).thenReturn("Respuesta");
+
+        when(llmClient.generate(anyString()))
+                .thenReturn("Respuesta");
 
         Long id = startConversation("¿Qué es POO?");
-        chatService.process(new ChatRequest("¿Qué es herencia?",      id, null), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es interfaz?",      id, null), USER_EMAIL);
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id, null), USER_EMAIL);
+
+        chatService.process(
+                new ChatRequest("¿Qué es herencia?", id, null, null),
+                USER_EMAIL,
+                "Maria"
+        );
+
+        chatService.process(
+                new ChatRequest("¿Qué es interfaz?", id, null, null),
+                USER_EMAIL,
+                "Ines"
+        );
+
+        chatService.process(
+                new ChatRequest("¿Qué es encapsulación?", id, null, null),
+                USER_EMAIL,
+                "Juan"
+        );
 
         var conv = conversationRepository.findById(id).orElseThrow();
+
         assertThat(conv.getSummary()).isNull();
     }
 
     @Test
     void compactacion_actualiza_summary_en_cada_request_posterior_al_umbral() {
-        when(llmClient.generate(anyString())).thenReturn("Respuesta del tutor");
-        when(llmClient.generate(argThat(p -> p != null && p.startsWith("Resume"))))
-                .thenReturn("Resumen request 5", "Resumen request 6");
+
+        when(llmClient.generate(argThat(
+                p -> p != null && p.startsWith("Resume")
+        ))).thenReturn(
+                "Resumen request 5",
+                "Resumen request 6"
+        );
+
+        when(llmClient.generate(argThat(
+                p -> p != null && !p.startsWith("Resume")
+        ))).thenReturn("Respuesta del tutor");
 
         Long id = startConversation("pregunta 1");
+
         for (int i = 2; i <= 6; i++) {
-            chatService.process(new ChatRequest("pregunta " + i, id, null), USER_EMAIL);
+            chatService.process(
+                    new ChatRequest("pregunta " + i, id, null, null),
+                    USER_EMAIL,
+                    "Pedro"
+            );
         }
 
         var conv = conversationRepository.findById(id).orElseThrow();
-        assertThat(conv.getSummary()).isEqualTo("Resumen request 6");
+
+        assertThat(conv.getSummary())
+                .isEqualTo("Resumen request 6");
     }
 }

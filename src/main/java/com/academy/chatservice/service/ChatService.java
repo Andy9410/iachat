@@ -48,7 +48,7 @@ public class ChatService {
     public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks, String clarificationMessage) {}
 
     @Transactional
-    public StreamPrep prepareStream(ChatRequest request, String userEmail) {
+    public StreamPrep prepareStream(ChatRequest request, String userEmail, String firstName) {
         var text = request.message().trim();
         if (text.isBlank()) {
             throw new IllegalArgumentException("El mensaje no puede estar vacío");
@@ -63,7 +63,7 @@ public class ChatService {
         String vectorStr = toVectorString(embeddingClient.embed(text));
         saveUserMessage(conversation, text, vectorStr);
 
-        var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
+        var similar = messageEmbeddingRepository.findSimilar(vectorStr, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
 
         // Persist the active document on the conversation so it survives frontend session resets
@@ -93,7 +93,7 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail);
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
@@ -106,7 +106,7 @@ public class ChatService {
     }
 
     @Transactional
-    public ChatResponse process(ChatRequest request, String userEmail) {
+    public ChatResponse process(ChatRequest request, String userEmail, String firstName) {
         var text = request.message().trim();
 
         if (text.isBlank()) {
@@ -122,7 +122,7 @@ public class ChatService {
         String vectorStr = toVectorString(embeddingClient.embed(text));
         saveUserMessage(conversation, text, vectorStr);
 
-        var similar = messageEmbeddingRepository.findSimilar(vectorStr, userEmail, conversation.getId(), contextProps.ragTopK());
+        var similar = messageEmbeddingRepository.findSimilar(vectorStr, conversation.getId(), contextProps.ragTopK());
         var window = getWindow(conversation.getId(), contextProps.windowSize());
 
         if (request.preferredDocumentId() != null
@@ -151,7 +151,7 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail));
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -282,13 +282,64 @@ public class ChatService {
         return vector.stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
     }
 
+    private String levelInstruction(Integer level) {
+        return switch (level != null ? level : 3) {
+            case 1 -> """
+                    [INSTRUCCIÓN DE NIVEL — PRIORIDAD MÁXIMA, ANULA CUALQUIER REGLA DE CONCISIÓN]:
+                    Nivel BÁSICO. Respondé como si le explicaras a alguien que nunca vio el tema.
+                    - Respuesta corta: 2 a 4 oraciones como máximo.
+                    - Usá analogías del mundo cotidiano, sin jerga técnica.
+                    - Si hay código, mostrá solo la parte mínima e indispensable.
+                    - Priorizá que se entienda sobre que sea completo.""";
+            case 2 -> """
+                    [INSTRUCCIÓN DE NIVEL — PRIORIDAD MÁXIMA, ANULA CUALQUIER REGLA DE CONCISIÓN]:
+                    Nivel SIMPLE. Respondé de forma accesible para alguien con nociones básicas.
+                    - Respuesta moderada: 1 a 2 párrafos.
+                    - Introducí cada término técnico con una breve explicación entre paréntesis.
+                    - Incluí un ejemplo concreto y simple.""";
+            case 4 -> """
+                    [INSTRUCCIÓN DE NIVEL — PRIORIDAD MÁXIMA, ANULA CUALQUIER REGLA DE CONCISIÓN]:
+                    Nivel AVANZADO. Respondé con profundidad técnica real.
+                    - Respuesta extensa: 3 a 5 párrafos o bloques de código detallados.
+                    - Explicá el "por qué" detrás de cada decisión técnica.
+                    - Incluí casos de uso, variantes y posibles problemas.
+                    - Asumí que el lector conoce los fundamentos.""";
+            case 5 -> """
+                    [INSTRUCCIÓN DE NIVEL — PRIORIDAD MÁXIMA, ANULA CUALQUIER REGLA DE CONCISIÓN]:
+                    Nivel EXPERTO. Respondé como lo haría un senior a otro senior.
+                    - Respuesta muy extensa y completa: sin límite de longitud, cubrí todo lo relevante.
+                    - Usá terminología técnica precisa sin explicarla.
+                    - Incluí implementaciones completas, optimizaciones, trade-offs y edge cases.
+                    - Referenciá patrones, estándares o literatura técnica si corresponde.""";
+            default -> """
+                    [INSTRUCCIÓN DE NIVEL]:
+                    Nivel INTERMEDIO. Respondé con un balance entre claridad y profundidad.
+                    - Respuesta de longitud media: 2 a 3 párrafos.
+                    - Usá terminología técnica estándar con contexto cuando sea necesario.
+                    - Incluí un ejemplo práctico.""";
+        };
+    }
+
     private String buildPrompt(String userMessage, String summary, List<Message> window,
                                List<SimilarMessageProjection> similar,
                                List<DocumentSearchClient.DocumentChunk> docChunks,
                                Long activeDocId,
-                               String userEmail) {
+                               String userEmail,
+                               Integer explanationLevel, String firstName ) {
+        String personalization = """
+            [SISTEMA]
+            El nombre del estudiante es %s.
+            
+            - Usá su nombre ocasionalmente.
+            - Especialmente en saludos o explicaciones importantes.
+            - No uses el nombre en todas las respuestas.
+            - Mantené un tono natural y humano.
+            """.formatted(firstName);
+
+
         var sb = new StringBuilder();
         sb.append(contextProps.systemPrompt()).append("\n");
+        sb.append(personalization).append("\n");
 
         if (!docChunks.isEmpty()) {
             sb.append("\nMaterial de estudio del documento activo:\n");
@@ -326,6 +377,7 @@ public class ChatService {
             }
         }
 
+        sb.append("\n").append(levelInstruction(explanationLevel));
         sb.append("\nPregunta del estudiante: ").append(userMessage);
         return sb.toString();
     }

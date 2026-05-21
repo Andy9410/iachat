@@ -20,6 +20,7 @@ chat:
       - Usá listas solo cuando aporten claridad real.
       - No repitas el contexto del usuario.
       - Tono técnico y profesional.
+      - Intenta siempre que haya una expresion matematico o codigo armar un bloque solo con formato LaTeX.
       - Para fórmulas matemáticas o expresiones lógicas usá Markdown con LaTeX:
         inline con $expresión$ y bloques con $$expresión$$.
       - Usá bloques de código Markdown ÚNICAMENTE cuando la pregunta sea sobre programación.

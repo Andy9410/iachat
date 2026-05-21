@@ -18,9 +18,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(ChatController.class)
 @Import(SecurityConfig.class)
@@ -40,6 +44,7 @@ class ChatControllerTest {
 
     @Test
     void health_debeRetornarOK() throws Exception {
+
         mockMvc.perform(get("/health"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("OK"));
@@ -48,37 +53,69 @@ class ChatControllerTest {
     @Test
     @WithMockUser
     void chat_conMensajeValido_debeRetornarRespuesta() throws Exception {
-        var request  = new ChatRequest("¿Qué es una variable?", null, null);
-        var response = new ChatResponse("Una variable es un espacio en memoria...", 1L);
 
-        when(chatService.process(eq(request), any())).thenReturn(response);
+        var request = new ChatRequest(
+                "¿Qué es una variable?",
+                null,
+                null,
+                null
+        );
+
+        var response = new ChatResponse(
+                "Una variable es un espacio en memoria...",
+                1L
+        );
+
+        when(chatService.process(
+                eq(request),
+                any(),
+                any()
+        )).thenReturn(response);
 
         mockMvc.perform(post("/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.response").value("Una variable es un espacio en memoria..."))
-                .andExpect(jsonPath("$.conversationId").value(1));
+                .andExpect(jsonPath("$.response")
+                        .value("Una variable es un espacio en memoria..."))
+                .andExpect(jsonPath("$.conversationId")
+                        .value(1));
     }
 
     @Test
     @WithMockUser
     void chat_conConversacionExistente_debeRetornarMismoId() throws Exception {
-        var request  = new ChatRequest("¿Qué es herencia?", 5L, null);
-        var response = new ChatResponse("La herencia es...", 5L);
 
-        when(chatService.process(eq(request), any())).thenReturn(response);
+        var request = new ChatRequest(
+                "¿Qué es herencia?",
+                5L,
+                null,
+                null
+        );
+
+        var response = new ChatResponse(
+                "La herencia es...",
+                5L
+        );
+
+        when(chatService.process(
+                eq(request),
+                any(),
+                any()
+        )).thenReturn(response);
 
         mockMvc.perform(post("/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.conversationId").value(5));
+                .andExpect(jsonPath("$.conversationId")
+                        .value(5));
     }
 
     @Test
     @WithMockUser
     void chat_conBodyVacio_debeRetornar400() throws Exception {
+
         mockMvc.perform(post("/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))

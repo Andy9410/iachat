@@ -91,6 +91,12 @@
             <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
             <version>7.14.0</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
     </dependencies>
 
     <build>

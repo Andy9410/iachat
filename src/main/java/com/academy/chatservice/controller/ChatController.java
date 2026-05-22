@@ -147,6 +147,7 @@ public class ChatController {
                     if (questions != null && !questions.isEmpty()) {
                         sse(writer, objectMapper.writeValueAsString(
                             Map.of("type", "suggestions", "questions", questions)));
+                        log.info("Sugerencias enviadas: {}", questions);
                     }
                 }
             } catch (Exception e) {

@@ -128,6 +128,32 @@ public class ChatController {
 
             chatService.finalizeStream(prep.conversationId(), full.toString());
 
+            try {
+                String userQuestion = request.message();
+                String assistantAnswer = full.toString();
+                String suggestionsPrompt =
+                    "Basándote en la conversación y en la última respuesta del tutor, generá exactamente 3 preguntas de seguimiento cortas que el estudiante podría hacerse. " +
+                    "Respondé ÚNICAMENTE con un array JSON de strings. Ejemplo: [\"¿Podés mostrarme un ejemplo?\",\"¿Cómo se aplica esto en código?\",\"¿Cuál es la diferencia con X?\"]\n\n" +
+                    "Última pregunta del estudiante: " + userQuestion + "\n" +
+                    "Última respuesta del tutor: " + assistantAnswer;
+                String suggestionsRaw = llmClient.generate(suggestionsPrompt);
+                // Extract JSON array from response (may have surrounding whitespace or text)
+                int start = suggestionsRaw.indexOf('[');
+                int end = suggestionsRaw.lastIndexOf(']');
+                if (start >= 0 && end > start) {
+                    String jsonArray = suggestionsRaw.substring(start, end + 1);
+                    List<String> questions = objectMapper.readValue(jsonArray,
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                    if (questions != null && !questions.isEmpty()) {
+                        sse(writer, objectMapper.writeValueAsString(
+                            Map.of("type", "suggestions", "questions", questions)));
+                        log.info("Sugerencias enviadas: {}", questions);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("No se pudieron generar sugerencias de seguimiento: {}", e.getMessage());
+            }
+
             if (!prep.docChunks().isEmpty()) {
                 var files = prep.docChunks().stream()
                         .map(c -> c.filename())

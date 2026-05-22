@@ -1,0 +1,16 @@
+FROM maven:3.9-eclipse-temurin-21
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends inotify-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-cachea dependencias en la imagen para poblar el volumen maven_cache_chat en el primer run
+COPY pom.xml .
+RUN mvn dependency:go-offline -q
+
+COPY entrypoint-dev.sh /entrypoint-dev.sh
+RUN chmod +x /entrypoint-dev.sh
+EXPOSE 8082
+
+ENTRYPOINT ["/entrypoint-dev.sh"]

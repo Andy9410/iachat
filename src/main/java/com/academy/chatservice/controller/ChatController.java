@@ -45,16 +45,25 @@ public class ChatController {
                                              @AuthenticationPrincipal Jwt jwt) {
 
 
+        log.info("JWT subject: {}", jwt.getSubject());
+        log.info("JWT claims keys: {}", jwt.getClaims().keySet());
+        log.info("JWT claims map: {}", jwt.getClaims());
+
         String userEmail = jwt.getSubject();
-        String firstName = jwt.getClaim("firstName");
+        String firstName = (String) jwt.getClaims().get("firstName");
+
+        log.info("userEmail={}, firstName={}", userEmail, firstName);
+
+
+        log.info("userEmail={}, firstName={}", userEmail, firstName);
 
         return ResponseEntity.ok(chatService.process(request, userEmail,firstName));
     }
 
     @GetMapping("/api/conversations")
     public ResponseEntity<List<ConversationSummaryDto>> myConversations(
-            @AuthenticationPrincipal String userEmail) {
-        return ResponseEntity.ok(chatService.getMyConversations(userEmail));
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(chatService.getMyConversations(jwt.getSubject()));
     }
 
     @GetMapping("/api/conversations/{id}/messages")
@@ -62,23 +71,23 @@ public class ChatController {
             @PathVariable Long id,
             @RequestParam(defaultValue = "30") int limit,
             @RequestParam(required = false) Long before,
-            @AuthenticationPrincipal String userEmail) {
-        return ResponseEntity.ok(chatService.getConversationMessages(id, userEmail, limit, before));
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(chatService.getConversationMessages(id, jwt.getSubject(), limit, before));
     }
 
     @PostMapping("/api/conversations/{id}/title")
     public ResponseEntity<Map<String, String>> generateTitle(
             @PathVariable Long id,
-            @AuthenticationPrincipal String userEmail) {
-        String title = chatService.generateTitle(id, userEmail);
+            @AuthenticationPrincipal Jwt jwt) {
+        String title = chatService.generateTitle(id, jwt.getSubject());
         return ResponseEntity.ok(Map.of("title", title));
     }
 
     @DeleteMapping("/api/conversations/{id}")
     public ResponseEntity<Void> deleteConversation(
             @PathVariable Long id,
-            @AuthenticationPrincipal String userEmail) {
-        chatService.deleteConversation(id, userEmail);
+            @AuthenticationPrincipal Jwt jwt) {
+        chatService.deleteConversation(id, jwt.getSubject());
         return ResponseEntity.noContent().build();
     }
 
@@ -145,8 +154,8 @@ public class ChatController {
     public ResponseEntity<Void> setActiveDocument(
             @PathVariable Long id,
             @RequestBody Map<String, Long> body,
-            @AuthenticationPrincipal String userEmail) {
-        chatService.setActiveDocument(id, body.get("documentId"), userEmail);
+            @AuthenticationPrincipal Jwt jwt) {
+        chatService.setActiveDocument(id, body.get("documentId"), jwt.getSubject());
         return ResponseEntity.noContent().build();
     }
 }

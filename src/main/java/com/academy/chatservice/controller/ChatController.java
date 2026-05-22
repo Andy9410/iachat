@@ -128,7 +128,7 @@ public class ChatController {
                 int prevLen = full.length();
                 full.append(chunk);
 
-                int markerIdx = full.indexOf("|||[");
+                int markerIdx = full.indexOf("|||");
                 String toSend;
                 if (markerIdx >= 0) {
                     markerFound[0] = true;
@@ -148,17 +148,19 @@ public class ChatController {
                 }
             });
 
-            // Extract |||[...] suggestions block appended by the LLM
+            // Extract ||| suggestions block appended by the LLM
             String rawResponse = full.toString();
             String cleanResponse = rawResponse;
             List<String> suggestions = List.of();
             try {
-                int markerIdx = rawResponse.lastIndexOf("|||[");
+                int markerIdx = rawResponse.lastIndexOf("|||");
                 if (markerIdx >= 0) {
-                    String jsonPart = rawResponse.substring(markerIdx + 3);
-                    int end = jsonPart.lastIndexOf(']');
+                    String after = rawResponse.substring(markerIdx + 3).trim();
+                    // Normalize: wrap in [] if the LLM omitted the brackets
+                    if (!after.startsWith("[")) after = "[" + after + "]";
+                    int end = after.lastIndexOf(']');
                     if (end >= 0) {
-                        String jsonArray = jsonPart.substring(0, end + 1);
+                        String jsonArray = after.substring(0, end + 1);
                         suggestions = objectMapper.readValue(jsonArray,
                             objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
                         cleanResponse = rawResponse.substring(0, markerIdx).stripTrailing();

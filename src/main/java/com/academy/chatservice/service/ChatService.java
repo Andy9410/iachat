@@ -14,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -57,7 +58,7 @@ public class ChatService {
         var conversation = resolveConversation(request.conversationId(), text, userEmail);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
-        compactIfNeeded(conversation, messageCount);
+        archiveOldMessagesIfNeeded(conversation, messageCount);
 
         var priorWindow = getWindow(conversation.getId(), 2);
         String vectorStr = toVectorString(embeddingClient.embed(text));
@@ -93,7 +94,9 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName);
+        boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
@@ -116,7 +119,7 @@ public class ChatService {
         var conversation = resolveConversation(request.conversationId(), text, userEmail);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
-        compactIfNeeded(conversation, messageCount);
+        archiveOldMessagesIfNeeded(conversation, messageCount);
 
         var priorWindow = getWindow(conversation.getId(), 2);
         String vectorStr = toVectorString(embeddingClient.embed(text));
@@ -151,7 +154,9 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName));
+        boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
+        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null));
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -228,19 +233,23 @@ public class ChatService {
         conversationRepository.save(conv);
     }
 
-    private void compactIfNeeded(Conversation conversation, long messageCount) {
-        int threshold = contextProps.compactionThreshold();
-        int window = contextProps.windowSize();
+    private void archiveOldMessagesIfNeeded(Conversation conversation, long messageCount) {
+        int threshold = contextProps.archiveThreshold();
         if (messageCount <= threshold) return;
+        if (conversation.getArchivedMessageCount() > 0) return; // already archived
 
-        long toSummarize = messageCount - window;
-        List<Message> oldMessages = messageRepository.findFirstN(conversation.getId(), (int) toSummarize);
+        List<Message> toArchive = messageRepository.findFirstN(conversation.getId(), threshold);
 
-        String summaryPrompt = buildSummaryPrompt(conversation.getSummary(), oldMessages);
-        String newSummary = llmClient.generate(summaryPrompt);
+        var sb = new StringBuilder();
+        for (Message m : toArchive) {
+            String role = m.getRole() == Message.Role.user ? "Estudiante" : "Tutor";
+            sb.append(role).append(": ").append(m.getContent()).append("\n");
+        }
 
-        conversation.setSummary(newSummary);
+        conversation.setArchivedContext(sb.toString().stripTrailing());
+        conversation.setArchivedMessageCount(threshold);
         conversationRepository.save(conversation);
+        log.info("[ARCHIVE] conversation_id={} archived {} messages", conversation.getId(), threshold);
     }
 
     private List<Message> getWindow(Long conversationId, int windowSize) {
@@ -325,7 +334,8 @@ public class ChatService {
                                List<DocumentSearchClient.DocumentChunk> docChunks,
                                Long activeDocId,
                                String userEmail,
-                               Integer explanationLevel, String firstName ) {
+                               Integer explanationLevel, String firstName,
+                               String archivedContext) {
         String personalization = """
             [SISTEMA]
             El nombre del estudiante es %s.
@@ -363,6 +373,11 @@ public class ChatService {
                 String role = "user".equals(s.getRole()) ? "Estudiante" : "Tutor";
                 sb.append(role).append(": ").append(s.getContent()).append("\n");
             }
+        }
+
+        if (archivedContext != null && !archivedContext.isBlank()) {
+            sb.append("\nContexto archivado (mensajes iniciales de esta conversación):\n")
+              .append(archivedContext).append("\n");
         }
 
         if (summary != null && !summary.isBlank()) {
@@ -427,22 +442,15 @@ public class ChatService {
         return lastUserMsg.isBlank() ? text : lastUserMsg + " " + text;
     }
 
-    private String buildSummaryPrompt(String existingSummary, List<Message> messages) {
-        var sb = new StringBuilder();
-        sb.append("Resume de forma concisa la siguiente conversación entre un estudiante y un tutor de programación.\n");
-
-        if (existingSummary != null && !existingSummary.isBlank()) {
-            sb.append("Resumen previo: ").append(existingSummary).append("\n\n");
-        }
-
-        sb.append("Conversación a resumir:\n");
-        for (Message m : messages) {
-            String role = m.getRole() == Message.Role.user ? "Estudiante" : "Tutor";
-            sb.append(role).append(": ").append(m.getContent()).append("\n");
-        }
-
-        sb.append("\nResumen:");
-        return sb.toString();
+    @Transactional(readOnly = true)
+    public Map<String, Object> getArchivedContext(Long conversationId, String userEmail) {
+        var conv = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+        return java.util.Map.of(
+                "archivedMessageCount", conv.getArchivedMessageCount(),
+                "hasArchivedContext", conv.getArchivedContext() != null,
+                "archivedContext", conv.getArchivedContext() != null ? conv.getArchivedContext() : ""
+        );
     }
 
     @Transactional

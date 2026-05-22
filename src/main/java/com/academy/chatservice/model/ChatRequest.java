@@ -7,5 +7,6 @@ public record ChatRequest(
         String message,
         Long conversationId,
         Long preferredDocumentId,
-        Integer explanationLevel
+        Integer explanationLevel,
+        Boolean includeFullHistory
 ) {}

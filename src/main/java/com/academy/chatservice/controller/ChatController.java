@@ -209,4 +209,11 @@ public class ChatController {
         chatService.setActiveDocument(id, body.get("documentId"), jwt.getSubject());
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/api/conversations/{id}/archived-context")
+    public ResponseEntity<Map<String, Object>> getArchivedContext(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(chatService.getArchivedContext(id, jwt.getSubject()));
+    }
 }

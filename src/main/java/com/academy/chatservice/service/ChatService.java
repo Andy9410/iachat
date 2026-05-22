@@ -379,6 +379,11 @@ public class ChatService {
 
         sb.append("\n").append(levelInstruction(explanationLevel));
         sb.append("\nPregunta del estudiante: ").append(userMessage);
+        sb.append("""
+
+            \n\nAl terminar tu respuesta añadí en una línea nueva exactamente esto (sin texto extra):
+            |||["pregunta corta 1","pregunta corta 2","pregunta corta 3"]
+            Las 3 preguntas deben ser en español, máximo 8 palabras cada una, relacionadas con el tema respondido.""");
         return sb.toString();
     }
 

@@ -39,6 +39,12 @@ public class Conversation {
     @Column(name = "active_document_id")
     private Long activeDocumentId;
 
+    @Column(name = "archived_context", columnDefinition = "TEXT")
+    private String archivedContext;
+
+    @Column(name = "archived_message_count", nullable = false)
+    private int archivedMessageCount = 0;
+
     public Long getId() { return id; }
     public String getUserEmail() { return userEmail; }
     public void setUserEmail(String userEmail) { this.userEmail = userEmail; }
@@ -52,5 +58,9 @@ public class Conversation {
     public void setHidden(boolean hidden) { this.hidden = hidden; }
     public Long getActiveDocumentId() { return activeDocumentId; }
     public void setActiveDocumentId(Long id) { this.activeDocumentId = id; }
+    public String getArchivedContext() { return archivedContext; }
+    public void setArchivedContext(String archivedContext) { this.archivedContext = archivedContext; }
+    public int getArchivedMessageCount() { return archivedMessageCount; }
+    public void setArchivedMessageCount(int count) { this.archivedMessageCount = count; }
 
 }

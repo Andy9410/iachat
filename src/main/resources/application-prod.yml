@@ -5,5 +5,8 @@ spring:
     password: ${DB_PASSWORD}
 
 llm:
+  provider: ${LLM_PROVIDER:groq}
   groq:
-    api-key: ${GROQ_API_KEY}
+    api-key: ${GROQ_API_KEY:}
+  openrouter:
+    api-key: ${OPENROUTER_API_KEY:}

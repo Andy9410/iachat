@@ -58,6 +58,7 @@ class ChatControllerTest {
                 "¿Qué es una variable?",
                 null,
                 null,
+                null,
                 null
         );
 
@@ -89,6 +90,7 @@ class ChatControllerTest {
         var request = new ChatRequest(
                 "¿Qué es herencia?",
                 5L,
+                null,
                 null,
                 null
         );

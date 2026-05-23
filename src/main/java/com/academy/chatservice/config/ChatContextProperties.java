@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record ChatContextProperties(
         @DefaultValue("20") int windowSize,
         @DefaultValue("50") int compactionThreshold,
+        @DefaultValue("10") int archiveThreshold,
         @DefaultValue("50") int titleMaxLength,
         @DefaultValue("Eres un asistente inteligente. Responde de forma clara y precisa.") String systemPrompt,
         @DefaultValue("3") int ragTopK

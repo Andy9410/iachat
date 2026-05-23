@@ -14,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -57,7 +58,7 @@ public class ChatService {
         var conversation = resolveConversation(request.conversationId(), text, userEmail);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
-        compactIfNeeded(conversation, messageCount);
+        archiveOldMessagesIfNeeded(conversation, messageCount);
 
         var priorWindow = getWindow(conversation.getId(), 2);
         String vectorStr = toVectorString(embeddingClient.embed(text));
@@ -86,14 +87,15 @@ public class ChatService {
             saveMessage(conversation, Message.Role.assistant, msg);
             return new StreamPrep(conversation.getId(), null, Collections.emptyList(), msg);
         }
-
         var docChunks = searchResult.chunks();
         log.info("[RAG DEBUG] conversation_id={} user={} active_doc_id={} retrieved_chunks={} documents_used=[{}] scores=[{}]",
                 conversation.getId(), userEmail, docId, docChunks.size(),
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName);
+        boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null);
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
@@ -116,7 +118,7 @@ public class ChatService {
         var conversation = resolveConversation(request.conversationId(), text, userEmail);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
-        compactIfNeeded(conversation, messageCount);
+        archiveOldMessagesIfNeeded(conversation, messageCount);
 
         var priorWindow = getWindow(conversation.getId(), 2);
         String vectorStr = toVectorString(embeddingClient.embed(text));
@@ -151,7 +153,16 @@ public class ChatService {
                 docChunks.stream().map(DocumentSearchClient.DocumentChunk::filename).distinct().collect(Collectors.joining(", ")),
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail, request.explanationLevel(), firstName));
+        boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
+
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null);
+
+
+
+
+        log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
+        var llmResponse = llmClient.generate(prompt);
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -209,6 +220,7 @@ public class ChatService {
         String prompt = "Genera un título de 2 a 6 palabras en español para una conversación que empieza con: \""
                 + firstMessage + "\". Responde solo con el título, sin comillas ni puntuación final.";
 
+        log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
         String raw = llmClient.generate(prompt).trim().replaceAll("[\"'.,;!?]", "");
         String[] words = raw.split("\\s+");
         String title = words.length > 6
@@ -228,19 +240,23 @@ public class ChatService {
         conversationRepository.save(conv);
     }
 
-    private void compactIfNeeded(Conversation conversation, long messageCount) {
-        int threshold = contextProps.compactionThreshold();
-        int window = contextProps.windowSize();
+    private void archiveOldMessagesIfNeeded(Conversation conversation, long messageCount) {
+        int threshold = contextProps.archiveThreshold();
         if (messageCount <= threshold) return;
+        if (conversation.getArchivedMessageCount() > 0) return; // already archived
 
-        long toSummarize = messageCount - window;
-        List<Message> oldMessages = messageRepository.findFirstN(conversation.getId(), (int) toSummarize);
+        List<Message> toArchive = messageRepository.findFirstN(conversation.getId(), threshold);
 
-        String summaryPrompt = buildSummaryPrompt(conversation.getSummary(), oldMessages);
-        String newSummary = llmClient.generate(summaryPrompt);
+        var sb = new StringBuilder();
+        for (Message m : toArchive) {
+            String role = m.getRole() == Message.Role.user ? "Estudiante" : "Tutor";
+            sb.append(role).append(": ").append(m.getContent()).append("\n");
+        }
 
-        conversation.setSummary(newSummary);
+        conversation.setArchivedContext(sb.toString().stripTrailing());
+        conversation.setArchivedMessageCount(threshold);
         conversationRepository.save(conversation);
+        log.info("[ARCHIVE] conversation_id={} archived {} messages", conversation.getId(), threshold);
     }
 
     private List<Message> getWindow(Long conversationId, int windowSize) {
@@ -325,7 +341,8 @@ public class ChatService {
                                List<DocumentSearchClient.DocumentChunk> docChunks,
                                Long activeDocId,
                                String userEmail,
-                               Integer explanationLevel, String firstName ) {
+                               Integer explanationLevel, String firstName,
+                               String archivedContext) {
         String personalization = """
             [SISTEMA]
             El nombre del estudiante es %s.
@@ -365,6 +382,11 @@ public class ChatService {
             }
         }
 
+        if (archivedContext != null && !archivedContext.isBlank()) {
+            sb.append("\nContexto archivado (mensajes iniciales de esta conversación):\n")
+              .append(archivedContext).append("\n");
+        }
+
         if (summary != null && !summary.isBlank()) {
             sb.append("\nResumen de esta conversación:\n").append(summary).append("\n");
         }
@@ -379,6 +401,12 @@ public class ChatService {
 
         sb.append("\n").append(levelInstruction(explanationLevel));
         sb.append("\nPregunta del estudiante: ").append(userMessage);
+        sb.append("""
+
+            \n\nAl terminar tu respuesta añadí en una línea nueva exactamente esto (sin texto extra):
+            |||["pregunta corta 1","pregunta corta 2","pregunta corta 3"]
+            Las 3 preguntas deben ser en español, máximo 8 palabras cada una, relacionadas con el tema respondido.""");
+
         return sb.toString();
     }
 
@@ -401,6 +429,7 @@ public class ChatService {
         try {
             String hydePrompt = "Responde en 2 oraciones técnicas y concisas a: \"" + base
                     + "\". Solo el contenido técnico, sin saludos ni explicaciones adicionales.";
+            log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
             String hypothetical = llmClient.generate(hydePrompt).trim();
             if (!hypothetical.isBlank()) {
                 log.info("[HyDE] query='{}' → hypothetical='{}'", base, hypothetical.substring(0, Math.min(80, hypothetical.length())));
@@ -422,22 +451,15 @@ public class ChatService {
         return lastUserMsg.isBlank() ? text : lastUserMsg + " " + text;
     }
 
-    private String buildSummaryPrompt(String existingSummary, List<Message> messages) {
-        var sb = new StringBuilder();
-        sb.append("Resume de forma concisa la siguiente conversación entre un estudiante y un tutor de programación.\n");
-
-        if (existingSummary != null && !existingSummary.isBlank()) {
-            sb.append("Resumen previo: ").append(existingSummary).append("\n\n");
-        }
-
-        sb.append("Conversación a resumir:\n");
-        for (Message m : messages) {
-            String role = m.getRole() == Message.Role.user ? "Estudiante" : "Tutor";
-            sb.append(role).append(": ").append(m.getContent()).append("\n");
-        }
-
-        sb.append("\nResumen:");
-        return sb.toString();
+    @Transactional(readOnly = true)
+    public Map<String, Object> getArchivedContext(Long conversationId, String userEmail) {
+        var conv = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+        return java.util.Map.of(
+                "archivedMessageCount", conv.getArchivedMessageCount(),
+                "hasArchivedContext", conv.getArchivedContext() != null,
+                "archivedContext", conv.getArchivedContext() != null ? conv.getArchivedContext() : ""
+        );
     }
 
     @Transactional

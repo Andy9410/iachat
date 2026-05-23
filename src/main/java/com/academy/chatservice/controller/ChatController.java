@@ -44,18 +44,8 @@ public class ChatController {
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request,
                                              @AuthenticationPrincipal Jwt jwt) {
 
-
-        log.info("JWT subject: {}", jwt.getSubject());
-        log.info("JWT claims keys: {}", jwt.getClaims().keySet());
-        log.info("JWT claims map: {}", jwt.getClaims());
-
         String userEmail = jwt.getSubject();
         String firstName = (String) jwt.getClaims().get("firstName");
-
-        log.info("userEmail={}, firstName={}", userEmail, firstName);
-
-
-        log.info("userEmail={}, firstName={}", userEmail, firstName);
 
         return ResponseEntity.ok(chatService.process(request, userEmail,firstName));
     }
@@ -117,41 +107,68 @@ public class ChatController {
             }
 
             var full = new StringBuilder();
+            var sentContent = new StringBuilder();
+            boolean[] markerFound = {false};
+
             llmClient.generateStream(prep.prompt(), chunk -> {
+                if (markerFound[0]) {
+                    full.append(chunk);
+                    return;
+                }
+                int prevLen = full.length();
                 full.append(chunk);
-                try {
-                    sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", chunk)));
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+
+                int markerIdx = full.indexOf("|||");
+                String toSend;
+                if (markerIdx >= 0) {
+                    markerFound[0] = true;
+                    // Only forward text before the marker; if marker spans chunks, send nothing new
+                    toSend = markerIdx >= prevLen ? full.substring(prevLen, markerIdx) : "";
+                } else {
+                    toSend = chunk;
+                }
+
+                if (!toSend.isEmpty()) {
+                    sentContent.append(toSend);
+                    try {
+                        sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", toSend)));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             });
 
-            chatService.finalizeStream(prep.conversationId(), full.toString());
-
+            // Extract ||| suggestions block appended by the LLM
+            String rawResponse = full.toString();
+            String cleanResponse = rawResponse;
+            List<String> suggestions = List.of();
             try {
-                String userQuestion = request.message();
-                String assistantAnswer = full.toString();
-                String suggestionsPrompt =
-                    "Basándote en la conversación y en la última respuesta del tutor, generá exactamente 3 preguntas de seguimiento cortas que el estudiante podría hacerse. " +
-                    "Respondé ÚNICAMENTE con un array JSON de strings. Ejemplo: [\"¿Podés mostrarme un ejemplo?\",\"¿Cómo se aplica esto en código?\",\"¿Cuál es la diferencia con X?\"]\n\n" +
-                    "Última pregunta del estudiante: " + userQuestion + "\n" +
-                    "Última respuesta del tutor: " + assistantAnswer;
-                String suggestionsRaw = llmClient.generate(suggestionsPrompt);
-                // Extract JSON array from response (may have surrounding whitespace or text)
-                int start = suggestionsRaw.indexOf('[');
-                int end = suggestionsRaw.lastIndexOf(']');
-                if (start >= 0 && end > start) {
-                    String jsonArray = suggestionsRaw.substring(start, end + 1);
-                    List<String> questions = objectMapper.readValue(jsonArray,
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                    if (questions != null && !questions.isEmpty()) {
-                        sse(writer, objectMapper.writeValueAsString(
-                            Map.of("type", "suggestions", "questions", questions)));
-                        log.info("Sugerencias enviadas: {}", questions);
+                int markerIdx = rawResponse.lastIndexOf("|||");
+                if (markerIdx >= 0) {
+                    String after = rawResponse.substring(markerIdx + 3).trim();
+                    // Normalize: wrap in [] if the LLM omitted the brackets
+                    if (!after.startsWith("[")) after = "[" + after + "]";
+                    int end = after.lastIndexOf(']');
+                    if (end >= 0) {
+                        String jsonArray = after.substring(0, end + 1);
+                        suggestions = objectMapper.readValue(jsonArray,
+                            objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                        cleanResponse = rawResponse.substring(0, markerIdx).stripTrailing();
                     }
                 }
             } catch (Exception e) {
-                log.warn("No se pudieron generar sugerencias de seguimiento: {}", e.getMessage());
+                log.warn("No se pudo parsear bloque de sugerencias: {}", e.getMessage());
+            }
+
+            chatService.finalizeStream(prep.conversationId(), cleanResponse);
+
+            // Patch client if marker leaked (split-token edge case)
+            if (markerFound[0] && !sentContent.toString().stripTrailing().equals(cleanResponse)) {
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "replace", "text", cleanResponse)));
+            }
+
+            if (!suggestions.isEmpty()) {
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "suggestions", "questions", suggestions)));
             }
 
             if (!prep.docChunks().isEmpty()) {
@@ -183,5 +200,12 @@ public class ChatController {
             @AuthenticationPrincipal Jwt jwt) {
         chatService.setActiveDocument(id, body.get("documentId"), jwt.getSubject());
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/conversations/{id}/archived-context")
+    public ResponseEntity<Map<String, Object>> getArchivedContext(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(chatService.getArchivedContext(id, jwt.getSubject()));
     }
 }

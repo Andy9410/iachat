@@ -29,3 +29,4 @@ chat:
   context:
     window-size: 2
     compaction-threshold: 6
+    archive-threshold: 6

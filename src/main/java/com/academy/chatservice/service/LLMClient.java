@@ -9,6 +9,8 @@ import java.util.function.Consumer;
 public interface LLMClient {
     String generate(String prompt);
 
+    default String modelName() { return "unknown"; }
+
     default void generateStream(String prompt, Consumer<String> chunkConsumer) {
         chunkConsumer.accept(generate(prompt));
     }

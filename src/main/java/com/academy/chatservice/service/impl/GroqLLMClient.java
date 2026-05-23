@@ -35,6 +35,9 @@ public class GroqLLMClient implements LLMClient {
     }
 
     @Override
+    public String modelName() { return props.model(); }
+
+    @Override
     public String generate(String prompt) {
         try {
             var body = objectMapper.writeValueAsString(new GroqRequest(

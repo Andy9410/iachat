@@ -91,8 +91,6 @@ public class DocumentSearchClient {
 
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
 
-            log.info("[RAG] document-service status={} body={}", response.statusCode(), response.body().substring(0, Math.min(200, response.body().length())));
-
             if (response.statusCode() != 200) {
                 return SearchResult.empty();
             }

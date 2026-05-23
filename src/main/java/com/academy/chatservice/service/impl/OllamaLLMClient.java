@@ -34,6 +34,9 @@ public class OllamaLLMClient implements LLMClient {
     }
 
     @Override
+    public String modelName() { return props.model(); }
+
+    @Override
     public String generate(String prompt) {
         try {
             String body = objectMapper.writeValueAsString(

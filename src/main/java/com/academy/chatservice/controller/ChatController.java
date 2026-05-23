@@ -44,18 +44,8 @@ public class ChatController {
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request,
                                              @AuthenticationPrincipal Jwt jwt) {
 
-
-        log.info("JWT subject: {}", jwt.getSubject());
-        log.info("JWT claims keys: {}", jwt.getClaims().keySet());
-        log.info("JWT claims map: {}", jwt.getClaims());
-
         String userEmail = jwt.getSubject();
         String firstName = (String) jwt.getClaims().get("firstName");
-
-        log.info("userEmail={}, firstName={}", userEmail, firstName);
-
-
-        log.info("userEmail={}, firstName={}", userEmail, firstName);
 
         return ResponseEntity.ok(chatService.process(request, userEmail,firstName));
     }

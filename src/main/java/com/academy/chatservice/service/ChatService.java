@@ -87,7 +87,6 @@ public class ChatService {
             saveMessage(conversation, Message.Role.assistant, msg);
             return new StreamPrep(conversation.getId(), null, Collections.emptyList(), msg);
         }
-
         var docChunks = searchResult.chunks();
         log.info("[RAG DEBUG] conversation_id={} user={} active_doc_id={} retrieved_chunks={} documents_used=[{}] scores=[{}]",
                 conversation.getId(), userEmail, docId, docChunks.size(),
@@ -155,8 +154,15 @@ public class ChatService {
                 docChunks.stream().map(c -> String.format("%.3f", c.similarity())).collect(Collectors.joining(", ")));
 
         boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
-        var llmResponse = llmClient.generate(buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
-                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null));
+
+        String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null);
+
+
+
+
+        log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
+        var llmResponse = llmClient.generate(prompt);
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -214,6 +220,7 @@ public class ChatService {
         String prompt = "Genera un título de 2 a 6 palabras en español para una conversación que empieza con: \""
                 + firstMessage + "\". Responde solo con el título, sin comillas ni puntuación final.";
 
+        log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
         String raw = llmClient.generate(prompt).trim().replaceAll("[\"'.,;!?]", "");
         String[] words = raw.split("\\s+");
         String title = words.length > 6
@@ -399,6 +406,7 @@ public class ChatService {
             \n\nAl terminar tu respuesta añadí en una línea nueva exactamente esto (sin texto extra):
             |||["pregunta corta 1","pregunta corta 2","pregunta corta 3"]
             Las 3 preguntas deben ser en español, máximo 8 palabras cada una, relacionadas con el tema respondido.""");
+
         return sb.toString();
     }
 
@@ -421,6 +429,7 @@ public class ChatService {
         try {
             String hydePrompt = "Responde en 2 oraciones técnicas y concisas a: \"" + base
                     + "\". Solo el contenido técnico, sin saludos ni explicaciones adicionales.";
+            log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
             String hypothetical = llmClient.generate(hydePrompt).trim();
             if (!hypothetical.isBlank()) {
                 log.info("[HyDE] query='{}' → hypothetical='{}'", base, hypothetical.substring(0, Math.min(80, hypothetical.length())));

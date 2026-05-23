@@ -52,5 +52,13 @@ document-service:
   similarity-threshold: ${DOCUMENT_SERVICE_SIMILARITY_THRESHOLD:0.45}
   enabled: ${DOCUMENT_SERVICE_ENABLED:true}
 
+llm:
+  provider: ${LLM_PROVIDER:groq}
+  openrouter:
+    model: ${OPENROUTER_MODEL:deepseek/deepseek-v4-flash:free"}
+    reasoning-enabled: ${OPENROUTER_REASONING_ENABLED:true}
+    connect-timeout-seconds: 10
+    request-timeout-seconds: 120
+
 jwt:
   secret: ${JWT_SECRET:}

@@ -69,18 +69,16 @@ public class OpenRouterLLMClient implements LLMClient {
     public void generateStream(String prompt, Consumer<String> onChunk) {
         try {
             var body = objectMapper.writeValueAsString(buildRequestBody(prompt, true));
-
             var request = buildHttpRequest(body);
-            var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            var response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
 
             if (response.statusCode() != 200) {
-                log.error("OpenRouter respondió con status {} en stream: {}", response.statusCode(), response.body());
+                String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
+                log.error("OpenRouter respondió con status {} en stream: {}", response.statusCode(), errorBody);
                 throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
             }
 
-            var lines = response.body().lines();
-
-            lines.forEach(line -> {
+            response.body().forEach(line -> {
                 if (!line.startsWith("data: ")) return;
                 String data = line.substring("data: ".length()).trim();
                 if ("[DONE]".equals(data)) return;

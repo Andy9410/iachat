@@ -160,7 +160,7 @@ public class ChatController {
                 log.warn("No se pudo parsear bloque de sugerencias: {}", e.getMessage());
             }
 
-            chatService.finalizeStream(prep.conversationId(), cleanResponse);
+            chatService.finalizeStream(prep.conversationId(), cleanResponse, suggestions);
 
             // Patch client if marker leaked (split-token edge case)
             if (markerFound[0] && !sentContent.toString().stripTrailing().equals(cleanResponse)) {

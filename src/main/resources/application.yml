@@ -62,3 +62,4 @@ llm:
 
 jwt:
   secret: ${JWT_SECRET:}
+

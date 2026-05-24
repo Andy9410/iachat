@@ -63,7 +63,7 @@ class ChatServiceIntegrationTest {
 
     private Long startConversation(String firstMessage) {
         var r = chatService.process(
-                new ChatRequest(firstMessage, null, null, null, null),
+                new ChatRequest(firstMessage, null, null, null, null, null),
                 USER_EMAIL,
                 FIRST_NAME
         );
@@ -75,10 +75,10 @@ class ChatServiceIntegrationTest {
     void archivado_guarda_contexto_en_BD_al_superar_umbral() {
         Long id = startConversation("¿Qué es POO?");
 
-        chatService.process(new ChatRequest("¿Qué es herencia?", id, null, null, null), USER_EMAIL, FIRST_NAME);
-        chatService.process(new ChatRequest("¿Qué es interfaz?", id, null, null, null), USER_EMAIL, FIRST_NAME);
-        chatService.process(new ChatRequest("¿Qué es encapsulación?", id, null, null, null), USER_EMAIL, FIRST_NAME);
-        chatService.process(new ChatRequest("¿Qué es polimorfismo?", id, null, null, null), USER_EMAIL, FIRST_NAME);
+        chatService.process(new ChatRequest("¿Qué es herencia?", id, null, null, null, null), USER_EMAIL, FIRST_NAME);
+        chatService.process(new ChatRequest("¿Qué es interfaz?", id, null, null, null, null), USER_EMAIL, FIRST_NAME);
+        chatService.process(new ChatRequest("¿Qué es encapsulación?", id, null, null, null, null), USER_EMAIL, FIRST_NAME);
+        chatService.process(new ChatRequest("¿Qué es polimorfismo?", id, null, null, null, null), USER_EMAIL, FIRST_NAME);
 
         var conv = conversationRepository.findById(id).orElseThrow();
 
@@ -91,8 +91,8 @@ class ChatServiceIntegrationTest {
     void archivado_no_se_activa_antes_del_umbral() {
         Long id = startConversation("¿Qué es POO?");
 
-        chatService.process(new ChatRequest("¿Qué es herencia?", id, null, null, null), USER_EMAIL, FIRST_NAME);
-        chatService.process(new ChatRequest("¿Qué es interfaz?", id, null, null, null), USER_EMAIL, FIRST_NAME);
+        chatService.process(new ChatRequest("¿Qué es herencia?", id, null, null, null, null), USER_EMAIL, FIRST_NAME);
+        chatService.process(new ChatRequest("¿Qué es interfaz?", id, null, null, null, null), USER_EMAIL, FIRST_NAME);
 
         var conv = conversationRepository.findById(id).orElseThrow();
 
@@ -106,7 +106,7 @@ class ChatServiceIntegrationTest {
 
         for (int i = 2; i <= 7; i++) {
             chatService.process(
-                    new ChatRequest("pregunta " + i, id, null, null, null),
+                    new ChatRequest("pregunta " + i, id, null, null, null, null),
                     USER_EMAIL,
                     FIRST_NAME
             );

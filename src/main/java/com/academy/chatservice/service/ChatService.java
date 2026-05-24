@@ -95,7 +95,8 @@ public class ChatService {
 
         boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
-                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null);
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
+                request.visiblePage());
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null);
     }
@@ -156,10 +157,8 @@ public class ChatService {
         boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
 
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
-                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null);
-
-
-
+                request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
+                request.visiblePage());
 
         log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
         var llmResponse = llmClient.generate(prompt);
@@ -342,7 +341,7 @@ public class ChatService {
                                Long activeDocId,
                                String userEmail,
                                Integer explanationLevel, String firstName,
-                               String archivedContext) {
+                               String archivedContext, Integer visiblePage) {
         String personalization = """
             [SISTEMA]
             El nombre del estudiante es %s.
@@ -427,7 +426,7 @@ public class ChatService {
     private String buildHydeQuery(String text, List<Message> priorWindow) {
         String base = buildSearchQuery(text, priorWindow);
         try {
-            String hydePrompt = "Responde en 2 oraciones técnicas y concisas a: \"" + base
+            String hydePrompt = "Responde en 2 oraciones técnicas y concisas sobre PROGRAMACIÓN/DESARROLLO DE SOFTWARE a: \"" + base
                     + "\". Solo el contenido técnico, sin saludos ni explicaciones adicionales.";
             log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
             String hypothetical = llmClient.generate(hydePrompt).trim();

@@ -118,4 +118,48 @@ class ChatServiceIntegrationTest {
         assertThat(conv.getArchivedMessageCount()).isEqualTo(6);
         assertThat(conv.getArchivedContext()).isNotNull();
     }
+
+    @Test
+    void sugerencias_se_persisten_y_se_retornan_al_cargar_mensajes() {
+        Long id = startConversation("¿Qué es POO?");
+
+        chatService.finalizeStream(id, "Respuesta", List.of("¿Qué es POO?", "¿Qué es herencia?"));
+
+        var page = chatService.getConversationMessages(id, USER_EMAIL, 20, null);
+        var lastAssistant = page.messages().stream()
+                .filter(m -> "assistant".equals(m.role()))
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new AssertionError("No assistant message found"));
+
+        assertThat(lastAssistant.suggestions())
+                .containsExactly("¿Qué es POO?", "¿Qué es herencia?");
+    }
+
+    @Test
+    void sugerencias_vacias_retornan_lista_vacia() {
+        Long id = startConversation("¿Qué es encapsulación?");
+
+        chatService.finalizeStream(id, "Respuesta", List.of());
+
+        var page = chatService.getConversationMessages(id, USER_EMAIL, 20, null);
+        var lastAssistant = page.messages().stream()
+                .filter(m -> "assistant".equals(m.role()))
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new AssertionError("No assistant message found"));
+
+        assertThat(lastAssistant.suggestions()).isNotNull().isEmpty();
+    }
+
+    @Test
+    void sugerencias_no_se_incluyen_en_mensajes_de_usuario() {
+        Long id = startConversation("¿Qué es polimorfismo?");
+
+        var page = chatService.getConversationMessages(id, USER_EMAIL, 20, null);
+        var userMessages = page.messages().stream()
+                .filter(m -> "user".equals(m.role()))
+                .toList();
+
+        assertThat(userMessages).isNotEmpty();
+        userMessages.forEach(m -> assertThat(m.suggestions()).isNotNull().isEmpty());
+    }
 }

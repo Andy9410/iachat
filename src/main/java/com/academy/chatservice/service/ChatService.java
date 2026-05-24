@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,7 @@ public class ChatService {
 
     private final LLMClient llmClient;
     private final EmbeddingClient embeddingClient;
+    private final ObjectMapper objectMapper;
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
     private final MessageEmbeddingRepository messageEmbeddingRepository;
@@ -36,7 +39,8 @@ public class ChatService {
                        MessageRepository messageRepository,
                        MessageEmbeddingRepository messageEmbeddingRepository,
                        ChatContextProperties contextProps,
-                       DocumentSearchClient documentSearchClient) {
+                       DocumentSearchClient documentSearchClient,
+                       ObjectMapper objectMapper) {
         this.llmClient = llmClient;
         this.embeddingClient = embeddingClient;
         this.conversationRepository = conversationRepository;
@@ -44,6 +48,7 @@ public class ChatService {
         this.messageEmbeddingRepository = messageEmbeddingRepository;
         this.contextProps = contextProps;
         this.documentSearchClient = documentSearchClient;
+        this.objectMapper = objectMapper;
     }
 
     public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks, String clarificationMessage) {}
@@ -101,10 +106,10 @@ public class ChatService {
     }
 
     @Transactional
-    public void finalizeStream(Long conversationId, String assistantResponse) {
+    public void finalizeStream(Long conversationId, String assistantResponse, List<String> suggestions) {
         var conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
-        saveMessage(conversation, Message.Role.assistant, assistantResponse);
+        saveMessage(conversation, Message.Role.assistant, assistantResponse, suggestions);
     }
 
     @Transactional
@@ -197,7 +202,7 @@ public class ChatService {
 
         // findLastN / findBeforeId return DESC — reverse to chronological ASC
         List<MessageDto> dtos = page.stream()
-                .map(m -> new MessageDto(m.getId(), m.getRole().name(), m.getContent(), m.getCreatedAt()))
+                .map(m -> new MessageDto(m.getId(), m.getRole().name(), m.getContent(), m.getCreatedAt(), parseSuggestions(m.getSuggestions())))
                 .collect(Collectors.toList());
         Collections.reverse(dtos);
 
@@ -287,11 +292,23 @@ public class ChatService {
     }
 
     private void saveMessage(Conversation conversation, Message.Role role, String content) {
+        saveMessage(conversation, role, content, List.of());
+    }
+
+    private void saveMessage(Conversation conversation, Message.Role role, String content, List<String> suggestions) {
         var msg = new Message();
         msg.setConversation(conversation);
         msg.setRole(role);
         msg.setContent(content);
+        if (suggestions != null && !suggestions.isEmpty()) {
+            try { msg.setSuggestions(objectMapper.writeValueAsString(suggestions)); } catch (Exception ignored) {}
+        }
         messageRepository.save(msg);
+    }
+
+    private List<String> parseSuggestions(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { return List.of(); }
     }
 
     private String toVectorString(List<Float> vector) {

@@ -22,6 +22,9 @@ public class Message {
     @Column(nullable = false)
     private String content;
 
+    @Column(columnDefinition = "TEXT")
+    private String suggestions;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -39,5 +42,7 @@ public class Message {
     public void setRole(Role role) { this.role = role; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getSuggestions() { return suggestions; }
+    public void setSuggestions(String suggestions) { this.suggestions = suggestions; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

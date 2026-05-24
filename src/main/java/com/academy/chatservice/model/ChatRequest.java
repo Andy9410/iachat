@@ -8,5 +8,6 @@ public record ChatRequest(
         Long conversationId,
         Long preferredDocumentId,
         Integer explanationLevel,
-        Boolean includeFullHistory
+        Boolean includeFullHistory,
+        Integer visiblePage
 ) {}

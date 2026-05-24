@@ -172,11 +172,19 @@ public class ChatController {
             }
 
             if (!prep.docChunks().isEmpty()) {
-                var files = prep.docChunks().stream()
-                        .map(c -> c.filename())
+                var citations = prep.docChunks().stream()
+                        .filter(c -> {
+                            // deduplicate by (filename, pageNumber)
+                            return true;
+                        })
+                        .map(c -> Map.of(
+                                "filename", c.filename(),
+                                "pageNumber", c.pageNumber() != null ? c.pageNumber() : 0,
+                                "documentId", c.documentId() != null ? c.documentId() : 0
+                        ))
                         .distinct()
                         .toList();
-                sse(writer, objectMapper.writeValueAsString(Map.of("type", "sources", "files", files)));
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "sources", "citations", citations)));
             }
 
             sse(writer, "{\"type\":\"done\"}");

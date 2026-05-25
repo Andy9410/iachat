@@ -8,5 +8,4 @@ RUN mvn package -DskipTests -q
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/target/chat-service-*.jar app.jar
-EXPOSE 8082
-ENTRYPOINT ["java", "-Xmx200m", "-Dserver.address=0.0.0.0","-jar", "app.jar"]
+CMD ["java", "-Dserver.port=8080", "-Dserver.address=0.0.0.0", "-jar", "app.jar"]

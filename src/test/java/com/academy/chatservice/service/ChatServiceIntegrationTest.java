@@ -33,6 +33,9 @@ class ChatServiceIntegrationTest {
     @MockBean
     private com.academy.chatservice.repository.MessageEmbeddingRepository messageEmbeddingRepository;
 
+    @MockBean
+    private DocumentSearchClient documentSearchClient;
+
     @Autowired
     private ChatService chatService;
 
@@ -53,6 +56,8 @@ class ChatServiceIntegrationTest {
         )).thenReturn(List.of());
 
         when(llmClient.generate(anyString())).thenReturn("Respuesta del tutor");
+        when(documentSearchClient.search(anyString(), anyString(), anyLong()))
+                .thenReturn(DocumentSearchClient.SearchResult.empty());
     }
 
     @AfterEach
@@ -161,5 +166,23 @@ class ChatServiceIntegrationTest {
 
         assertThat(userMessages).isNotEmpty();
         userMessages.forEach(m -> assertThat(m.suggestions()).isNotNull().isEmpty());
+    }
+
+    @Test
+    void prompt_usa_memoria_como_fallback_cuando_documento_no_tiene_contexto() {
+        when(llmClient.generate(anyString())).thenReturn("La herencia permite reutilizar comportamiento.");
+        Long id = startConversation("Explicame herencia en POO");
+
+        var prep = chatService.prepareStream(
+                new ChatRequest("¿Me lo resumís?", id, 123L, null, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
+
+        assertThat(prep.prompt())
+                .contains("no se encontró información relevante")
+                .contains("memoria conversacional")
+                .contains("No encontré esta información en los documentos adjuntos")
+                .contains("La herencia permite reutilizar comportamiento.");
     }
 }

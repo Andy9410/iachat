@@ -384,10 +384,15 @@ public class ChatService {
         } else if (activeDocId != null) {
             // Document was set but retrieval returned nothing — tell the model explicitly
             sb.append("\n[SISTEMA: El usuario tiene un documento activo pero no se encontró " +
-                      "información relevante en él para esta pregunta. Si la respuesta requiere " +
-                      "contenido específico del documento, indicá: " +
-                      "\"No encontré información sobre esto en los documentos actuales.\" " +
-                      "No uses contexto de otros documentos.]\n");
+                      "información relevante en él para esta pregunta. Antes de indicar falta de " +
+                      "información, buscá exclusivamente en la memoria conversacional provista abajo " +
+                      "(contexto relevante, contexto archivado, resumen e historial reciente). " +
+                      "Si la memoria contiene información útil, respondé solo con esa memoria e indicá " +
+                      "de forma natural: \"No encontré esta información en los documentos adjuntos, " +
+                      "pero anteriormente en esta conversación se mencionó que...\". " +
+                      "No consideres la pregunta actual como memoria útil. Si tampoco hay información " +
+                      "útil en la memoria, indicá que no disponés de información suficiente para responder. " +
+                      "No inventes información y no uses contexto de otros documentos.]\n");
         }
 
         if (!similar.isEmpty()) {

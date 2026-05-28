@@ -3,7 +3,7 @@ set -e
 
 echo "▶ Iniciando chat-service (modo desarrollo)..."
 mvn spring-boot:run \
-  -Dspring-boot.run.jvmArguments="-Dserver.port=${SERVER_PORT:-8082} -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE:-dev}" &
+  -Dspring-boot.run.jvmArguments="-Dserver.port=${SERVER_PORT:-8080} -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE:-dev}" &
 SPRING_PID=$!
 
 trap "kill $SPRING_PID 2>/dev/null; exit 0" SIGTERM SIGINT

@@ -2,9 +2,12 @@ app = "chat-service-academy"
 primary_region = "gru"
 
 [env]
-    SPRING_PROFILES_ACTIVE = "prod"
-    LLM_PROVIDER = "groq"
-    DOCUMENT_SERVICE_URL = "https://document-service-academy.fly.dev"
+SPRING_PROFILES_ACTIVE = "prod"
+LLM_PROVIDER = "groq"
+DOCUMENT_SERVICE_URL = "https://document-service-academy.fly.dev"
+
+SERVER_PORT = "8080"
+SERVER_ADDRESS = "0.0.0.0"
 
 [build]
 
@@ -24,8 +27,14 @@ primary_region = "gru"
     method = "GET"
     path = "/actuator/health"
 
+[[http_service.checks]]
+grace_period = "90s"
+interval = "15s"
+timeout = "10s"
+method = "GET"
+path = "/health"
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
-  cpus = 1
+memory = "1024mb"
+cpu_kind = "shared"
+cpus = 1

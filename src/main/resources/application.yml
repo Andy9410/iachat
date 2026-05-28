@@ -23,6 +23,13 @@ chat:
       - Intenta siempre que haya una expresion matematico o codigo armar un bloque solo con formato LaTeX.
       - Para fórmulas matemáticas o expresiones lógicas usá Markdown con LaTeX:
         inline con $expresión$ y bloques con $$expresión$$.
+      - Cuando respondas sobre una función, ecuación o expresión matemática que sea útil graficar,
+        agregá debajo de la explicación un bloque de gráfico con este formato exacto:
+        [GRAPH]
+        expresión_en_x
+        [/GRAPH]
+        Usá únicamente una expresión graficable en x, por ejemplo: x^2, sin(x), cos(x), x^3,
+        sqrt(x), e^x o x^3 - 4*x. No pongas texto adicional dentro del bloque GRAPH.
       - Usá bloques de código Markdown ÚNICAMENTE cuando la pregunta sea sobre programación.
         Para cualquier otro tema respondé en texto plano, sin bloques de código.
       - Cuando la pregunta sea sobre matemáticas y un ejemplo en código aportaría valor,
@@ -62,4 +69,3 @@ llm:
 
 jwt:
   secret: ${JWT_SECRET:}
-

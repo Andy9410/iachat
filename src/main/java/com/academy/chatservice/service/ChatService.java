@@ -2,9 +2,13 @@ package com.academy.chatservice.service;
 
 import com.academy.chatservice.config.ChatContextProperties;
 import com.academy.chatservice.model.*;
+import com.academy.chatservice.model.tools.LLMToolResponse;
+import com.academy.chatservice.model.tools.ToolCall;
 import com.academy.chatservice.repository.ConversationRepository;
 import com.academy.chatservice.repository.MessageEmbeddingRepository;
 import com.academy.chatservice.repository.MessageRepository;
+import com.academy.chatservice.service.tools.ToolExecutionContext;
+import com.academy.chatservice.service.tools.ToolRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -32,6 +36,9 @@ public class ChatService {
     private final MessageEmbeddingRepository messageEmbeddingRepository;
     private final ChatContextProperties contextProps;
     private final DocumentSearchClient documentSearchClient;
+    private final ToolRegistry toolRegistry;
+    private final ToolExecutionContext toolExecutionContext;
+    private final WhiteboardService whiteboardService;
 
     public ChatService(LLMClient llmClient,
                        EmbeddingClient embeddingClient,
@@ -40,6 +47,9 @@ public class ChatService {
                        MessageEmbeddingRepository messageEmbeddingRepository,
                        ChatContextProperties contextProps,
                        DocumentSearchClient documentSearchClient,
+                       ToolRegistry toolRegistry,
+                       ToolExecutionContext toolExecutionContext,
+                       WhiteboardService whiteboardService,
                        ObjectMapper objectMapper) {
         this.llmClient = llmClient;
         this.embeddingClient = embeddingClient;
@@ -48,10 +58,22 @@ public class ChatService {
         this.messageEmbeddingRepository = messageEmbeddingRepository;
         this.contextProps = contextProps;
         this.documentSearchClient = documentSearchClient;
+        this.toolRegistry = toolRegistry;
+        this.toolExecutionContext = toolExecutionContext;
+        this.whiteboardService = whiteboardService;
         this.objectMapper = objectMapper;
     }
 
-    public record StreamPrep(Long conversationId, String prompt, List<DocumentSearchClient.DocumentChunk> docChunks, String clarificationMessage) {}
+    public record StreamPrep(
+            Long conversationId,
+            String prompt,
+            List<DocumentSearchClient.DocumentChunk> docChunks,
+            String clarificationMessage,
+            String userMessage,
+            Integer explanationLevel,
+            String activeWhiteboardId,
+            WhiteboardInterpretationResponse whiteboardInterpretation
+    ) {}
 
     @Transactional
     public StreamPrep prepareStream(ChatRequest request, String userEmail, String firstName) {
@@ -90,7 +112,8 @@ public class ChatService {
         if (searchResult.ambiguous()) {
             String msg = buildAmbiguityMessage(searchResult.exerciseRef(), searchResult.ambiguousDocuments());
             saveMessage(conversation, Message.Role.assistant, msg);
-            return new StreamPrep(conversation.getId(), null, Collections.emptyList(), msg);
+            return new StreamPrep(conversation.getId(), null, Collections.emptyList(), msg, text,
+                    request.explanationLevel(), request.activeWhiteboardId(), request.whiteboardInterpretation());
         }
         var docChunks = searchResult.chunks();
         log.info("[RAG DEBUG] conversation_id={} user={} active_doc_id={} retrieved_chunks={} documents_used=[{}] scores=[{}]",
@@ -101,9 +124,10 @@ public class ChatService {
         boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
-                request.visiblePage());
+                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation());
 
-        return new StreamPrep(conversation.getId(), prompt, docChunks, null);
+        return new StreamPrep(conversation.getId(), prompt, docChunks, null, text,
+                request.explanationLevel(), request.activeWhiteboardId(), request.whiteboardInterpretation());
     }
 
     @Transactional
@@ -111,6 +135,64 @@ public class ChatService {
         var conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
         saveMessage(conversation, Message.Role.assistant, assistantResponse, suggestions);
+    }
+
+    public LLMToolResponse generateWithRegisteredTools(String prompt) {
+        if (!llmClient.supportsToolCalling()) {
+            return new LLMToolResponse(llmClient.generate(prompt), List.of());
+        }
+        return llmClient.generateWithTools(prompt, toolRegistry.definitions());
+    }
+
+    public boolean shouldUseRegisteredTools(StreamPrep prep) {
+        return prep != null && shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation());
+    }
+
+    public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {
+        return whiteboardInterpretation == null
+                && activeWhiteboardId != null
+                && !activeWhiteboardId.isBlank();
+    }
+
+    public Object executeToolCall(ToolCall toolCall, String userEmail, Long conversationId) {
+        return toolExecutionContext.withContext(
+                userEmail,
+                conversationId,
+                () -> toolRegistry.execute(toolCall.name(), toolCall.arguments())
+        );
+    }
+
+    public boolean shouldForceExerciseBreakdown(StreamPrep prep) {
+        String text = prep.userMessage() == null ? "" : prep.userMessage().toLowerCase();
+        boolean asksForSteps = text.contains("paso a paso")
+                || text.contains("desglos")
+                || text.contains("guía")
+                || text.contains("guia")
+                || text.contains("ayudame con el ejercicio")
+                || text.contains("ayúdame con el ejercicio")
+                || text.contains("explicame el ejercicio")
+                || text.contains("explícame el ejercicio");
+        boolean mentionsExercise = text.contains("ejercicio") || text.contains("exercise");
+        return asksForSteps && mentionsExercise;
+    }
+
+    public Object executeExerciseBreakdownFallback(StreamPrep prep) {
+        String exerciseTitle = extractExerciseTitle(prep.userMessage());
+        String exerciseText = buildExerciseText(prep);
+        String userLevel = mapUserLevel(prep.explanationLevel());
+        boolean showFullSolution = asksForFullSolution(prep.userMessage());
+
+        try {
+            String args = objectMapper.writeValueAsString(Map.of(
+                    "exerciseText", exerciseText,
+                    "exerciseTitle", exerciseTitle,
+                    "userLevel", userLevel,
+                    "showFullSolution", showFullSolution
+            ));
+            return toolRegistry.execute("break_down_exercise", args);
+        } catch (Exception e) {
+            throw new RuntimeException("No se pudo ejecutar fallback de break_down_exercise", e);
+        }
     }
 
     @Transactional
@@ -163,10 +245,28 @@ public class ChatService {
 
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
-                request.visiblePage());
+                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation());
 
-        log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
-        var llmResponse = llmClient.generate(prompt);
+        String llmResponse;
+        boolean useRegisteredTools = llmClient.supportsToolCalling()
+                && shouldUseRegisteredTools(request.activeWhiteboardId(), request.whiteboardInterpretation());
+        log.info("[LLM] provider={} model={} tools={} use_registered_tools={}",
+                llmClient.getClass().getSimpleName(), llmClient.modelName(), llmClient.supportsToolCalling(), useRegisteredTools);
+        if (useRegisteredTools) {
+            var toolAwareResponse = generateWithRegisteredTools(prompt);
+            if (toolAwareResponse.hasToolCalls()) {
+                Object toolResult = executeToolCall(toolAwareResponse.toolCalls().get(0), userEmail, conversation.getId());
+                try {
+                    llmResponse = objectMapper.writeValueAsString(toolResult);
+                } catch (Exception e) {
+                    throw new RuntimeException("No se pudo serializar el resultado de la tool", e);
+                }
+            } else {
+                llmResponse = toolAwareResponse.content();
+            }
+        } else {
+            llmResponse = llmClient.generate(prompt);
+        }
 
         saveMessage(conversation, Message.Role.assistant, llmResponse);
 
@@ -184,6 +284,15 @@ public class ChatService {
                         (int) messageRepository.countByConversationId(c.getId())
                 ))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public ConversationSummaryDto createConversation(String userEmail, String title) {
+        var conversation = new Conversation();
+        conversation.setUserEmail(userEmail);
+        conversation.setTitle(title == null || title.isBlank() ? "Nueva conversación" : title.trim());
+        var saved = conversationRepository.save(conversation);
+        return new ConversationSummaryDto(saved.getId(), saved.getTitle(), saved.getCreatedAt(), 0);
     }
 
     @Transactional(readOnly = true)
@@ -358,7 +467,9 @@ public class ChatService {
                                Long activeDocId,
                                String userEmail,
                                Integer explanationLevel, String firstName,
-                               String archivedContext, Integer visiblePage) {
+                               String archivedContext, Integer visiblePage,
+                               String activeWhiteboardId,
+                               WhiteboardInterpretationResponse whiteboardInterpretation) {
         String personalization = """
             [SISTEMA]
             El nombre del estudiante es %s.
@@ -412,6 +523,12 @@ public class ChatService {
             sb.append("\nResumen de esta conversación:\n").append(summary).append("\n");
         }
 
+        if (whiteboardInterpretation != null) {
+            sb.append(buildWhiteboardContext(whiteboardInterpretation, activeWhiteboardId));
+        } else if (activeWhiteboardId != null && !activeWhiteboardId.isBlank()) {
+            sb.append(buildWhiteboardContext(activeWhiteboardId, userEmail));
+        }
+
         if (!window.isEmpty()) {
             sb.append("\nHistorial reciente:\n");
             for (Message m : window) {
@@ -421,12 +538,140 @@ public class ChatService {
         }
 
         sb.append("\n").append(levelInstruction(explanationLevel));
+        sb.append("""
+
+            [TOOLS DISPONIBLES]
+            Si el estudiante pide ayuda paso a paso, guía progresiva, desglose de un ejercicio,
+            explicación por etapas, o solicita resolver un ejercicio identificado del PDF, usá la tool
+            break_down_exercise en lugar de responder como texto normal.
+            - exerciseText debe contener el enunciado más completo disponible a partir del mensaje y del material de estudio.
+            - exerciseTitle debe ser el identificador más claro disponible, por ejemplo "Ejercicio 2".
+            - userLevel debe mapearse a basico, intermedio o avanzado según el nivel de explicación actual.
+            - showFullSolution debe ser false salvo que el estudiante pida explícitamente la solución completa, respuesta final o resolución completa.
+            """);
+
+        if (activeWhiteboardId != null && !activeWhiteboardId.isBlank()) {
+            sb.append("""
+            Pizarra Inteligente:
+            - Si el estudiante pregunta "¿Está bien?", "¿Qué me falta?", "Revisalo", "Continuemos",
+              "Ayudame con este algoritmo" o pide revisar lo que hizo visualmente, usá tools de pizarra.
+            - Si el bloque [PIZARRA INTERPRETADA] está presente, NO llames interpret_whiteboard; respondé directamente usando su Tipo, Texto OCR, Ecuación detectada y Resumen semántico.
+            - Si el bloque [PIZARRA ACTIVA] incluye whiteboardId pero no hay interpretación, usá interpret_whiteboard con ese ID.
+            - Si no hay whiteboardId visible, usá get_active_whiteboard para consultar la pizarra activa.
+            - No respondas sobre nodos de inicio/fin si la interpretación indica que la pizarra es matemática o texto libre.
+            - Para resumir lo dibujado, usá summarize_whiteboard.
+            - Para sugerir cambios visuales, usá propose_whiteboard_change.
+            - Nunca modifiques la pizarra directamente. propose_whiteboard_change solo devuelve una sugerencia; el estudiante decide si aplicarla.
+            """);
+        }
         sb.append("\nPregunta del estudiante: ").append(userMessage);
         sb.append("""
 
-            \n\nAl terminar tu respuesta añadí en una línea nueva exactamente esto (sin texto extra):
-            |||["pregunta corta 1","pregunta corta 2","pregunta corta 3"]
-            Las 3 preguntas deben ser en español, máximo 8 palabras cada una, relacionadas con el tema respondido.""");
+            \n\nAl terminar tu respuesta añadí una línea de sugerencias con este formato exacto:
+            |||["sugerencia real 1","sugerencia real 2","sugerencia real 3"]
+            Reemplazá esos textos por 3 preguntas o acciones concretas en español, entre 2 y 8 palabras cada una,
+            relacionadas con el tema respondido. No copies las palabras "sugerencia real" ni uses placeholders.
+            No agregues markdown, etiquetas, títulos, bloques de código ni texto extra después de esa línea.""");
+
+        return sb.toString();
+    }
+
+    private String buildWhiteboardContext(String activeWhiteboardId, String userEmail) {
+        try {
+            WhiteboardInterpretationResponse interpretation = whiteboardService.interpret(activeWhiteboardId, userEmail);
+            return buildWhiteboardContext(interpretation, activeWhiteboardId);
+        } catch (Exception e) {
+            log.warn("No se pudo agregar contexto de pizarra activa id={}", activeWhiteboardId, e);
+            return "\n[PIZARRA ACTIVA]\n"
+                    + "whiteboardId: " + activeWhiteboardId + "\n"
+                    + "No se pudo recuperar el contenido guardado de la pizarra. "
+                    + "Podés usar las tools de pizarra con este ID si la consulta lo requiere.\n";
+        }
+    }
+
+    private String buildWhiteboardContext(WhiteboardInterpretationResponse interpretation, String fallbackWhiteboardId) {
+        String whiteboardId = interpretation.whiteboardId() != null ? interpretation.whiteboardId() : fallbackWhiteboardId;
+        String type = interpretation.type() != null ? interpretation.type() : "unknown";
+        String ocrText = interpretation.ocrText() != null ? interpretation.ocrText() : "";
+        String equation = interpretation.equation();
+        double confidence = interpretation.confidence();
+        boolean hasEquation = equation != null && !equation.isBlank();
+        boolean hasOcrText = !ocrText.isBlank();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n[PIZARRA ACTIVA]\n");
+        sb.append("whiteboardId: ").append(whiteboardId != null ? whiteboardId : "").append("\n");
+        sb.append("título: ").append(interpretation.title() != null ? interpretation.title() : "").append("\n");
+        sb.append("ejercicio: ").append(interpretation.exerciseLabel() != null ? interpretation.exerciseLabel() : "").append("\n");
+        sb.append("documentId: ").append(interpretation.documentId() != null ? interpretation.documentId() : "").append("\n");
+        sb.append("\n[PIZARRA INTERPRETADA]\n");
+        sb.append("Tipo: ").append(type).append("\n");
+        if (hasEquation) {
+            sb.append("Ecuación detectada:\n").append(equation).append("\n");
+        }
+        sb.append("Texto OCR: ").append(ocrText).append("\n");
+        sb.append("Elementos estructurados: ").append(interpretation.structuredElements()).append("\n");
+        sb.append("Resumen semántico: ").append(interpretation.semanticSummary()).append("\n");
+        sb.append("Confianza: ").append(confidence).append("\n");
+
+        // ── Instrucciones condicionales según calidad de interpretación ────────────
+        sb.append("\n[INSTRUCCIONES ESPECÍFICAS SEGÚN INTERPRETACIÓN]\n");
+
+        if ("unknown".equals(type)) {
+            sb.append("PRIORIDAD MÁXIMA — type=unknown: No se pudo interpretar la pizarra.\n");
+            sb.append("- NO generes párrafos largos ni análisis.\n");
+            sb.append("- Respondé breve: \"No pude interpretar la pizarra con claridad. ");
+            sb.append("Probá escribir la ecuación con la herramienta de texto o seleccioná modo Matemática.\"\n");
+
+        } else if (confidence < 0.75) {
+            sb.append("PRIORIDAD MÁXIMA — Confianza BAJA (").append(confidence).append(" < 0.75):\n");
+            sb.append("- NO generes explicaciones largas ni análisis detallados.\n");
+            sb.append("- NO inventes contenido ni des recomendaciones genéricas.\n");
+            sb.append("- NO uses frases como \"sería útil tener más información\", ");
+            sb.append("\"la calidad de la imagen...\", \"podría deberse a varios factores...\" o similares.\n");
+            if (hasEquation) {
+                sb.append("- Mostrá claramente la ecuación detectada y preguntá al estudiante si es correcta.\n");
+                sb.append("- Ejemplo: \"Detecté posiblemente: `").append(equation).append("` ¿Está bien?\"\n");
+                sb.append("- Si el estudiante confirma la ecuación, ahí sí podés resolverla. ");
+                sb.append("Si no, pedí que la escriba con la herramienta de texto.\n");
+            } else if (hasOcrText) {
+                sb.append("- Preguntá al estudiante si el texto detectado en la pizarra es correcto.\n");
+                sb.append("- No analices ni resuelvas hasta tener confirmación.\n");
+            } else if ("graph".equals(type)) {
+                sb.append("- La pizarra parece contener una gráfica en ejes cartesianos, aunque la lectura no es perfecta.\n");
+                sb.append("- NO le pidas al estudiante que escriba una ecuación: el contenido es una gráfica, no una expresión.\n");
+                sb.append("- Ofrecé analizar la gráfica: pendiente, puntos de corte, crecimiento/decrecimiento, comportamiento de la función.\n");
+                sb.append("- Ejemplo: \"Parece que dibujaste una gráfica con ejes cartesianos. ¿Querés que analice pendiente, puntos de corte o comportamiento de la función?\"\n");
+            } else {
+                sb.append("- El Texto OCR está vacío. Indicá que no se pudo leer con claridad.\n");
+                sb.append("- Sugerí usar la herramienta de texto para escribir la ecuación.\n");
+            }
+            sb.append("- Sé breve: 2 a 3 oraciones como máximo. Pedí confirmación al estudiante.\n");
+
+        } else {
+            // confidence >= 0.75
+            sb.append("Confianza ALTA (").append(confidence).append(" ≥ 0.75): podés proceder con el análisis normalmente.\n");
+            if ("math".equals(type) && hasEquation) {
+                sb.append("- Podés resolver o analizar la ecuación matemática detectada.\n");
+            }
+            if ("graph".equals(type)) {
+                sb.append("- La pizarra contiene una gráfica sobre ejes cartesianos.\n");
+                sb.append("- No le pidas al estudiante que escriba la ecuación.\n");
+                sb.append("- Ofrecé analizar: pendiente, puntos de corte, máximos y mínimos, comportamiento de la función.\n");
+                sb.append("- Ejemplo: \"Detecté una posible gráfica sobre ejes cartesianos. Parece haber una curva creciente. ¿Querés que analice pendiente, puntos de corte, máximos y mínimos, o comportamiento de la función?\"\n");
+            }
+            if ("geometry".equals(type)) {
+                sb.append("- La pizarra contiene figuras geométricas.\n");
+                sb.append("- Ofrecé analizar: propiedades, área, perímetro, ángulos, relaciones entre figuras.\n");
+            }
+            if ("text".equals(type)) {
+                sb.append("- Respondé basándote en el texto detectado en la pizarra.\n");
+            }
+        }
+
+        // Reglas generales siempre presentes
+        sb.append("- Nunca modifiques la pizarra directamente.\n");
+        sb.append("- Si necesitás una propuesta visual, usá propose_whiteboard_change con este whiteboardId.\n");
 
         return sb.toString();
     }
@@ -443,6 +688,46 @@ public class ChatService {
             sb.append("- ").append(name).append("\n");
         }
         return sb.toString();
+    }
+
+    private String extractExerciseTitle(String userMessage) {
+        if (userMessage == null || userMessage.isBlank()) return "Ejercicio";
+        var matcher = java.util.regex.Pattern
+                .compile("(?i)ejercicio\\s+([\\w.-]+)")
+                .matcher(userMessage);
+        if (matcher.find()) {
+            return "Ejercicio " + matcher.group(1);
+        }
+        return "Ejercicio";
+    }
+
+    private String buildExerciseText(StreamPrep prep) {
+        if (prep.docChunks() != null && !prep.docChunks().isEmpty()) {
+            return prep.docChunks().stream()
+                    .map(DocumentSearchClient.DocumentChunk::chunkText)
+                    .filter(text -> text != null && !text.isBlank())
+                    .limit(4)
+                    .collect(Collectors.joining("\n\n"));
+        }
+        return prep.userMessage();
+    }
+
+    private String mapUserLevel(Integer explanationLevel) {
+        return switch (explanationLevel != null ? explanationLevel : 3) {
+            case 1, 2 -> "basico";
+            case 4, 5 -> "avanzado";
+            default -> "intermedio";
+        };
+    }
+
+    private boolean asksForFullSolution(String userMessage) {
+        String text = userMessage == null ? "" : userMessage.toLowerCase();
+        return text.contains("solución completa")
+                || text.contains("solucion completa")
+                || text.contains("respuesta final")
+                || text.contains("resolvelo completo")
+                || text.contains("resuélvelo completo")
+                || text.contains("resolver completo");
     }
 
     private String buildHydeQuery(String text, List<Message> priorWindow) {

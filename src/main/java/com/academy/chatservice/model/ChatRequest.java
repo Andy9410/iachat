@@ -7,7 +7,20 @@ public record ChatRequest(
         String message,
         Long conversationId,
         Long preferredDocumentId,
+        String activeWhiteboardId,
+        WhiteboardInterpretationResponse whiteboardInterpretation,
         Integer explanationLevel,
         Boolean includeFullHistory,
         Integer visiblePage
-) {}
+) {
+    public ChatRequest(
+            String message,
+            Long conversationId,
+            Long preferredDocumentId,
+            Integer explanationLevel,
+            Boolean includeFullHistory,
+            Integer visiblePage
+    ) {
+        this(message, conversationId, preferredDocumentId, null, null, explanationLevel, includeFullHistory, visiblePage);
+    }
+}

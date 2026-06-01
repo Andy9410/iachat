@@ -2,18 +2,13 @@ package com.academy.chatservice.service.impl;
 
 import com.academy.chatservice.config.OpenRouterProperties;
 import com.academy.chatservice.model.WhiteboardInterpretationResponse;
-import com.academy.chatservice.model.tools.LLMToolResponse;
-import com.academy.chatservice.model.tools.ToolCall;
-import com.academy.chatservice.model.tools.ToolDefinition;
-import com.academy.chatservice.service.LLMClient;
+import com.academy.chatservice.service.VisionModelClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -21,23 +16,19 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 @Component
-@ConditionalOnProperty(name = "llm.provider", havingValue = "openrouter")
-public class OpenRouterLLMClient implements LLMClient {
+public class OpenRouterVisionClient implements VisionModelClient {
 
-    private static final Logger log = LoggerFactory.getLogger(OpenRouterLLMClient.class);
+    private static final Logger log = LoggerFactory.getLogger(OpenRouterVisionClient.class);
     private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
-    private static final String DEFAULT_FREE_MODEL = "liquid/lfm-2.5-1.2b-instruct:free";
     private static final String DEFAULT_FREE_VISION_MODEL = "google/gemma-4-26b-a4b-it:free";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final OpenRouterProperties props;
 
-    public OpenRouterLLMClient(ObjectMapper objectMapper, OpenRouterProperties props) {
+    public OpenRouterVisionClient(ObjectMapper objectMapper, OpenRouterProperties props) {
         this.objectMapper = objectMapper;
         this.props = props;
         this.httpClient = HttpClient.newBuilder()
@@ -46,109 +37,16 @@ public class OpenRouterLLMClient implements LLMClient {
     }
 
     @Override
-    public String modelName() { return freeModel(props.model(), DEFAULT_FREE_MODEL); }
-
-    public String visionModelName() { return freeModel(props.visionModel(), DEFAULT_FREE_VISION_MODEL); }
-
-    @Override
-    public boolean supportsToolCalling() { return true; }
-
-    @Override
-    public String generate(String prompt) {
-        try {
-            var body = objectMapper.writeValueAsString(buildRequestBody(prompt, false));
-
-            var response = sendString(body, apiKeyForPrompt(prompt));
-
-            if (response.statusCode() != 200) {
-                log.error("OpenRouter respondió con status {}: {}", response.statusCode(), response.body());
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
-            }
-
-            JsonNode json = objectMapper.readTree(response.body());
-            return json.path("choices").get(0).path("message").path("content").asText();
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Request a OpenRouter interrumpido", e);
-        } catch (Exception e) {
-            log.error("Error llamando a OpenRouter: {}", e.getMessage(), e);
-            throw new RuntimeException("Error al llamar a OpenRouter", e);
-        }
-    }
-
-    @Override
-    public void generateStream(String prompt, Consumer<String> onChunk) {
-        try {
-            var body = objectMapper.writeValueAsString(buildRequestBody(prompt, true));
-            var response = sendLines(body, apiKeyForPrompt(prompt));
-
-            if (response.statusCode() != 200) {
-                String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
-                log.error("OpenRouter respondió con status {} en stream: {}", response.statusCode(), errorBody);
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
-            }
-
-            response.body().forEach(line -> {
-                if (!line.startsWith("data: ")) return;
-                String data = line.substring("data: ".length()).trim();
-                if ("[DONE]".equals(data)) return;
-                try {
-                    JsonNode json = objectMapper.readTree(data);
-                    JsonNode content = json.path("choices").get(0).path("delta").path("content");
-                    if (!content.isMissingNode() && !content.isNull()) {
-                        String text = content.asText();
-                        if (!text.isEmpty()) {
-                            onChunk.accept(text);
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("No se pudo parsear chunk SSE de OpenRouter: {}", data, e);
-                }
-            });
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Stream a OpenRouter interrumpido", e);
-        } catch (Exception e) {
-            log.error("Error en stream a OpenRouter: {}", e.getMessage(), e);
-            throw new RuntimeException("Error en stream a OpenRouter", e);
-        }
-    }
-
-    @Override
-    public LLMToolResponse generateWithTools(String prompt, List<ToolDefinition> tools) {
-        try {
-            var body = objectMapper.writeValueAsString(buildRequestBody(prompt, false, tools));
-            var response = sendString(body, apiKeyForPrompt(prompt));
-
-            if (response.statusCode() != 200) {
-                log.error("OpenRouter respondió con status {} usando tools: {}", response.statusCode(), response.body());
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
-            }
-
-            JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
-            return parseToolResponse(message);
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Request a OpenRouter interrumpido", e);
-        } catch (Exception e) {
-            log.error("Error llamando a OpenRouter con tools: {}", e.getMessage(), e);
-            throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
-        }
-    }
-
     public WhiteboardInterpretationResponse interpretWhiteboardImage(String imageBase64, String whiteboardId) {
         long startTime = System.currentTimeMillis();
         int imageSize = imageBase64 != null ? imageBase64.length() : 0;
-        log.info("[WHITEBOARD_INTERPRET] whiteboardId={} Enviando a OpenRouter LLM vision. imageSize={}bytes", whiteboardId, imageSize);
+        log.info("[WHITEBOARD_INTERPRET] whiteboardId={} Enviando a OpenRouter vision. imageSize={}bytes", whiteboardId, imageSize);
 
         try {
             var body = objectMapper.writeValueAsString(buildVisionRequestBody(imageBase64));
             log.debug("[WHITEBOARD_INTERPRET] whiteboardId={} Request body size={}bytes", whiteboardId, body.length());
 
-            var response = sendString(body, whiteboardApiKey());
+            var response = httpClient.send(buildHttpRequest(body), HttpResponse.BodyHandlers.ofString());
             long elapsed = System.currentTimeMillis() - startTime;
 
             log.info("[WHITEBOARD_INTERPRET] whiteboardId={} OpenRouter response: status={} elapsed={}ms",
@@ -212,26 +110,6 @@ public class OpenRouterLLMClient implements LLMClient {
         }
     }
 
-    private Map<String, Object> buildRequestBody(String prompt, boolean stream) {
-        return buildRequestBody(prompt, stream, List.of());
-    }
-
-    private Map<String, Object> buildRequestBody(String prompt, boolean stream, List<ToolDefinition> tools) {
-        var messages = List.of(Map.of("role", "user", "content", prompt));
-        var body = new java.util.LinkedHashMap<String, Object>();
-        body.put("model", modelName());
-        body.put("messages", messages);
-        body.put("stream", stream);
-        if (tools != null && !tools.isEmpty()) {
-            body.put("tools", tools.stream().map(this::toOpenAiTool).toList());
-            body.put("tool_choice", "auto");
-        }
-        if (props.reasoningEnabled()) {
-            body.put("reasoning", Map.of("enabled", true));
-        }
-        return body;
-    }
-
     private Map<String, Object> buildVisionRequestBody(String imageBase64) {
         var prompt = """
                 Sos un intérprete de pizarras educativas.
@@ -254,7 +132,7 @@ public class OpenRouterLLMClient implements LLMClient {
                 - Curvas o rectas sobre esos ejes
 
                 Si hay ejes cartesianos o curvas, usá "graph".
-                NO clasifiques como "equation" si el contenido principal es una gráfica con ejes.
+                NO clasifiques como "math" si el contenido principal es una gráfica con ejes.
 
                 Respondé únicamente JSON válido:
 
@@ -291,33 +169,6 @@ public class OpenRouterLLMClient implements LLMClient {
         return body;
     }
 
-    private Map<String, Object> toOpenAiTool(ToolDefinition definition) {
-        return Map.of(
-                "type", "function",
-                "function", Map.of(
-                        "name", definition.name(),
-                        "description", definition.description(),
-                        "parameters", definition.parameters()
-                )
-        );
-    }
-
-    private LLMToolResponse parseToolResponse(JsonNode message) {
-        List<ToolCall> toolCalls = new java.util.ArrayList<>();
-        JsonNode calls = message.path("tool_calls");
-        if (calls.isArray()) {
-            for (JsonNode call : calls) {
-                JsonNode function = call.path("function");
-                toolCalls.add(new ToolCall(
-                        call.path("id").asText(""),
-                        function.path("name").asText(),
-                        function.path("arguments").asText("{}")
-                ));
-            }
-        }
-        return new LLMToolResponse(message.path("content").asText(""), toolCalls);
-    }
-
     private WhiteboardInterpretationResponse parseVisionInterpretation(String content, String whiteboardId) {
         try {
             String json = extractJsonObject(content);
@@ -344,7 +195,7 @@ public class OpenRouterLLMClient implements LLMClient {
                     confidence
             );
         } catch (Exception e) {
-            log.warn("No se pudo parsear JSON de visión OpenRouter: {}", content, e);
+            log.warn("[WHITEBOARD_INTERPRET] whiteboardId={} No se pudo parsear JSON de visión: {}", whiteboardId, content, e);
             return unknownWhiteboard(whiteboardId);
         }
     }
@@ -388,29 +239,17 @@ public class OpenRouterLLMClient implements LLMClient {
     }
 
     private HttpRequest buildHttpRequest(String body) {
-        return buildHttpRequest(body, openRouterApiKey());
-    }
-
-    private HttpRequest buildWhiteboardHttpRequest(String body) {
-        return buildHttpRequest(body, whiteboardApiKey());
-    }
-
-    private HttpRequest buildHttpRequest(String body, String apiKey) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(props.baseUrl() + COMPLETIONS_PATH))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
+                .header("Authorization", "Bearer " + whiteboardApiKey())
                 .timeout(Duration.ofSeconds(props.requestTimeoutSeconds()))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
     }
 
-    private HttpResponse<String> sendString(String body, String apiKey) throws IOException, InterruptedException {
-        return httpClient.send(buildHttpRequest(body, apiKey), HttpResponse.BodyHandlers.ofString());
-    }
-
-    private HttpResponse<Stream<String>> sendLines(String body, String apiKey) throws IOException, InterruptedException {
-        return httpClient.send(buildHttpRequest(body, apiKey), HttpResponse.BodyHandlers.ofLines());
+    private String visionModelName() {
+        return freeModel(props.visionModel(), DEFAULT_FREE_VISION_MODEL);
     }
 
     private String whiteboardApiKey() {
@@ -421,30 +260,8 @@ public class OpenRouterLLMClient implements LLMClient {
         return normalizedKey(props.apiKey());
     }
 
-    private String openRouterApiKey() {
-        String apiKey = normalizedKey(props.apiKey());
-        if (!apiKey.isBlank()) {
-            return apiKey;
-        }
-        return whiteboardApiKey();
-    }
-
-    private String apiKeyForPrompt(String prompt) {
-        if (usesWhiteboardContext(prompt)) {
-            return whiteboardApiKey();
-        }
-        return openRouterApiKey();
-    }
-
     private String normalizedKey(String apiKey) {
         return apiKey == null ? "" : apiKey.trim();
-    }
-
-    private boolean usesWhiteboardContext(String prompt) {
-        return prompt != null && (
-                prompt.contains("[PIZARRA ACTIVA]")
-                        || prompt.contains("[PIZARRA INTERPRETADA]")
-        );
     }
 
     private String freeModel(String model, String fallback) {
@@ -452,7 +269,7 @@ public class OpenRouterLLMClient implements LLMClient {
         String trimmed = model.trim();
         if (trimmed.toLowerCase(java.util.Locale.ROOT).contains("free")) return trimmed;
         String freeVariant = trimmed + ":free";
-        log.warn("OpenRouter model '{}' no es free; usando variante '{}'", trimmed, freeVariant);
+        log.warn("OpenRouter vision model '{}' no es free; usando variante '{}'", trimmed, freeVariant);
         return freeVariant;
     }
 }

@@ -23,7 +23,12 @@ chat:
       - Intenta siempre que haya una expresion matematico o codigo armar un bloque solo con formato LaTeX.
       - Para fórmulas matemáticas o expresiones lógicas usá Markdown con LaTeX:
         inline con $expresión$ y bloques con $$expresión$$.
-      - Cuando respondas sobre una función, ecuación o expresión matemática que sea útil graficar,
+      - No agregues funciones, ecuaciones, gráficos ni ejemplos que el usuario no haya pedido o que no estén
+        claramente en el contexto recuperado.
+      - Si el usuario pide entender un concepto, explicá ese concepto con precisión: definición, idea clave,
+        regla o procedimiento mínimo, y un ejemplo solo si ayuda directamente a esa explicación.
+      - No agregues gráficos por iniciativa propia.
+      - Solo si el estudiante pide explícitamente graficar, ver la gráfica, dibujar la función o plotear,
         agregá debajo de la explicación un bloque de gráfico con este formato exacto:
         [GRAPH]
         expresión_en_x
@@ -32,10 +37,7 @@ chat:
         sqrt(x), e^x o x^3 - 4*x. No pongas texto adicional dentro del bloque GRAPH.
       - Usá bloques de código Markdown ÚNICAMENTE cuando la pregunta sea sobre programación.
         Para cualquier otro tema respondé en texto plano, sin bloques de código.
-      - Cuando la pregunta sea sobre matemáticas y un ejemplo en código aportaría valor,
-        primero resolvé la pregunta matemáticamente, luego preguntá al usuario:
-        "¿Querés que te muestre cómo implementarlo en código?" antes de escribir cualquier bloque de código.
-        Solo generá el código si el usuario responde afirmativamente.
+      - No ofrezcas implementar en código una explicación matemática salvo que el usuario lo pida.
       - Ejemplos breves, no párrafos extensos.
       - Si la pregunta no es sobre programación ni matemáticas, respondé en texto plano sin formato especial.
       - Respondé SOLO usando el contexto recuperado.
@@ -52,6 +54,9 @@ chat:
         sin símbolos de formato del PDF, sin caracteres extraños, sin saltos de línea innecesarios.
         Si el texto del chunk contiene ruido tipográfico (guiones sueltos, espacios dobles, fragmentos
         cortados), reconstruí la idea de forma legible antes de responder.
+      - Sobre la pizarra interpretada (PRIORIDAD MÁXIMA si aplica):
+        Si [PIZARRA INTERPRETADA] tiene Confianza < 0.75, NO resuelvas ni analices la ecuación.
+        Primero pedí confirmación al estudiante. Sé breve y no inventes contenido.
 
 document-service:
   base-url: ${DOCUMENT_SERVICE_URL:http://localhost:8083}
@@ -62,7 +67,8 @@ document-service:
 llm:
   provider: ${LLM_PROVIDER:groq}
   openrouter:
-    model: ${OPENROUTER_MODEL:deepseek/deepseek-v4-flash:free"}
+    model: ${OPENROUTER_MODEL:liquid/lfm-2.5-1.2b-instruct:free}
+    vision-model: ${OPENROUTER_VISION_MODEL:google/gemma-4-26b-a4b-it:free}
     reasoning-enabled: ${OPENROUTER_REASONING_ENABLED:false}
     connect-timeout-seconds: 10
     request-timeout-seconds: 120

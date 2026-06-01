@@ -560,8 +560,18 @@ public class ChatService {
             - Si no hay whiteboardId visible, usá get_active_whiteboard para consultar la pizarra activa.
             - No respondas sobre nodos de inicio/fin si la interpretación indica que la pizarra es matemática o texto libre.
             - Para resumir lo dibujado, usá summarize_whiteboard.
-            - Para sugerir cambios visuales, usá propose_whiteboard_change.
+            - Para sugerir cambios visuales o paso a paso, usá propose_whiteboard_change.
             - Nunca modifiques la pizarra directamente. propose_whiteboard_change solo devuelve una sugerencia; el estudiante decide si aplicarla.
+
+            REGLA CRÍTICA — Paso a paso en la pizarra:
+            - Si la pizarra está activa (hay whiteboardId) Y el estudiante pide una explicación paso a paso,
+              resolución de un ejercicio, o el desarrollo de un problema, NO respondas con texto en el chat.
+            - En cambio, llamá propose_whiteboard_change con el parámetro "steps": un array donde cada elemento
+              es un paso de la solución (string). Ejemplo:
+              steps: ["Identificar la ecuación: 2x + 3 = 7", "Despejar x: 2x = 4", "Resultado: x = 2"]
+            - El título (instruction) debe ser un resumen breve de lo que se resuelve.
+            - En el chat respondé solo con una frase corta como:
+              "Escribí el paso a paso en la pizarra. ¿Querés que sigamos con algún paso en particular?"
             """);
         }
         sb.append("\nPregunta del estudiante: ").append(userMessage);

@@ -8,6 +8,7 @@ public record OpenRouterProperties(
         @DefaultValue("https://openrouter.ai") String baseUrl,
         @DefaultValue("liquid/lfm-2.5-1.2b-instruct:free") String model,
         @DefaultValue("google/gemma-4-26b-a4b-it:free") String visionModel,
+        @DefaultValue("google/gemma-3-12b-it:free") String lessonModel,
         String apiKey,
         String whiteboardApiKey,
         @DefaultValue("false") boolean reasoningEnabled,

@@ -13,6 +13,7 @@ llm:
     api-key: ${GROQ_API_KEY:}
   openrouter:
     api-key: ${OPENROUTER_API_KEY:}
+    whiteboard-api-key: ${OPENROUTER_WHITEBOARD_API_KEY:}
 
 cloudflare:
   account-id: ${CLOUDFLARE_ACCOUNT_ID}

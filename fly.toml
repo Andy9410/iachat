@@ -12,7 +12,7 @@ SERVER_ADDRESS = "0.0.0.0"
 [build]
 
 [http_service]
-  internal_port = 8082
+  internal_port = 8080
   force_https = true
   auto_stop_machines = false
   auto_start_machines = true
@@ -26,13 +26,6 @@ SERVER_ADDRESS = "0.0.0.0"
     timeout = "5s"
     method = "GET"
     path = "/health"
-
-[[http_service.checks]]
-grace_period = "90s"
-interval = "15s"
-timeout = "10s"
-method = "GET"
-path = "/health"
 
 [[vm]]
 memory = "1024mb"

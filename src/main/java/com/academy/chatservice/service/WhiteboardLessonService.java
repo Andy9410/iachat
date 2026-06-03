@@ -102,58 +102,34 @@ public class WhiteboardLessonService {
     }
 
     private String buildPrompt(String userMessage, String assistantMessage) {
-        return """
-                Sos un profesor de matemática y programación.
-                Generá una explicación visual paso a paso para una pizarra interactiva.
+        return "Sos un profesor. Creá una lección visual para pizarra basada en este intercambio:\n\n"
+                + "PREGUNTA: " + userMessage + "\n\n"
+                + "EXPLICACIÓN: " + assistantMessage + "\n\n"
+                + """
+                Generá 3 a 5 pasos usando el contenido real de la PREGUNTA y EXPLICACIÓN de arriba.
+                IMPORTANTE: El "text" de cada elemento debe contener contenido real del tema, NO ejemplos genéricos.
 
-                PREGUNTA DEL USUARIO:
-                """ + userMessage + """
+                Coordenadas: x entre 40-500, y entre 40-180. Cada paso debe tener al menos 1 elemento.
 
-                RESPUESTA DEL ASISTENTE:
-                """ + assistantMessage + """
+                Para algoritmos usá: rect (proceso), diamond (decisión), arrow (flujo), text (pseudocódigo).
+                Para matemática usá: equation (fórmulas reales del tema), text (pasos).
 
-                INSTRUCCIONES:
-                - Generá entre 3 y 6 pasos.
-                - Cada paso representa UNA acción conceptual.
-                - Cada paso es INDEPENDIENTE (muestra la imagen completa del concepto en ese paso).
-                - El canvas mide aproximadamente 600 de ancho × 380 de alto (píxeles).
-                - Distribuí los elementos para que sean legibles y no se superpongan.
-                - Usá coordenadas realistas: x entre 40 y 560, y entre 40 y 340.
-                - Para ecuaciones largas, usá y >= 100 para dejar espacio al título.
-
-                TIPOS DE ELEMENTOS:
-                - "text": { "type": "text", "x": ..., "y": ..., "text": "...", "stroke": "#0f172a" }
-                - "equation": { "type": "equation", "x": ..., "y": ..., "text": "...", "stroke": "#0f172a" }
-                - "rect": { "type": "rect", "x": ..., "y": ..., "width": 160, "height": 60, "text": "...", "stroke": "#0f172a", "fill": "#ffffff" }
-                - "circle": { "type": "circle", "x": ..., "y": ..., "width": 120, "height": 60, "text": "...", "stroke": "#0f172a", "fill": "#ffffff" }
-                - "diamond": { "type": "diamond", "x": ..., "y": ..., "width": 140, "height": 72, "text": "...", "stroke": "#0f172a", "fill": "#ffffff" }
-                - "arrow": { "type": "arrow", "x": ..., "y": ..., "width": 120, "height": 0, "stroke": "#0f172a" }
-
-                EJEMPLO DE FORMATO DE RESPUESTA (seguí exactamente este JSON):
+                Formato JSON requerido:
                 {
-                  "title": "Resolver ecuación lineal",
+                  "title": "<título real del tema>",
                   "steps": [
                     {
                       "id": "step-1",
-                      "title": "Identificar la ecuación",
-                      "explanation": "Observamos la ecuación original.",
+                      "title": "<título del paso>",
+                      "explanation": "<explicación breve>",
                       "elements": [
-                        { "id": "el-1-1", "type": "equation", "x": 220, "y": 140, "text": "2x + 3 = 4", "stroke": "#0f172a" }
-                      ]
-                    },
-                    {
-                      "id": "step-2",
-                      "title": "Restar 3 en ambos lados",
-                      "explanation": "Restamos 3 para aislar el término con x.",
-                      "elements": [
-                        { "id": "el-2-1", "type": "equation", "x": 220, "y": 120, "text": "2x + 3 - 3 = 4 - 3", "stroke": "#0f172a" },
-                        { "id": "el-2-2", "type": "equation", "x": 250, "y": 180, "text": "2x = 1", "stroke": "#0f172a" }
+                        { "id": "e1", "type": "rect", "x": 50, "y": 60, "width": 200, "height": 60, "text": "<texto real>" }
                       ]
                     }
                   ]
                 }
 
-                Respondé SOLO con JSON válido. Sin markdown, sin texto antes o después del JSON.
+                Respondé SOLO con JSON. Sin markdown.
                 """;
     }
 
@@ -175,11 +151,33 @@ public class WhiteboardLessonService {
                     List<Map<String, Object>> elements = new ArrayList<>();
                     JsonNode elementsNode = stepNode.path("elements");
                     if (elementsNode.isArray()) {
+                        int elIndex = 0;
                         for (JsonNode el : elementsNode) {
                             Map<String, Object> element = objectMapper.convertValue(el, Map.class);
                             element.put("id", UUID.randomUUID().toString());
+                            // Ensure x/y are always valid numbers
+                            if (!(element.get("x") instanceof Number)) element.put("x", 60 + elIndex * 20);
+                            if (!(element.get("y") instanceof Number)) element.put("y", 60 + elIndex * 30);
+                            // Ensure type is a valid whiteboard element type
+                            String type = element.get("type") instanceof String t ? t : "text";
+                            if (!java.util.Set.of("text","equation","rect","circle","diamond","arrow","path").contains(type)) {
+                                element.put("type", "text");
+                            }
                             elements.add(element);
+                            elIndex++;
                         }
+                    }
+
+                    // Garantizar al menos un elemento por paso para que la pizarra no quede vacía
+                    if (elements.isEmpty()) {
+                        Map<String, Object> fallback = new java.util.LinkedHashMap<>();
+                        fallback.put("id", UUID.randomUUID().toString());
+                        fallback.put("type", "text");
+                        fallback.put("x", 60);
+                        fallback.put("y", 80);
+                        fallback.put("text", stepTitle);
+                        fallback.put("stroke", "#0f172a");
+                        elements.add(fallback);
                     }
 
                     steps.add(new LessonStepDto(id, stepTitle, explanation, elements));

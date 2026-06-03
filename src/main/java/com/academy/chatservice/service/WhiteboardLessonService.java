@@ -168,7 +168,7 @@ public class WhiteboardLessonService {
                         }
                     }
 
-                    // Garantizar al menos un elemento por paso para que la pizarra no quede vacía
+                    // Garantizar al menos un elemento por paso
                     if (elements.isEmpty()) {
                         Map<String, Object> fallback = new java.util.LinkedHashMap<>();
                         fallback.put("id", UUID.randomUUID().toString());
@@ -180,6 +180,7 @@ public class WhiteboardLessonService {
                         elements.add(fallback);
                     }
 
+                    applyAutoLayout(elements);
                     steps.add(new LessonStepDto(id, stepTitle, explanation, elements));
                 }
             }
@@ -198,6 +199,75 @@ public class WhiteboardLessonService {
             log.error("[WHITEBOARD_LESSON] user={} Error parseando lección: {} content={}", userEmail, e.getMessage(), truncate(content, 500));
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "El modelo devolvió una respuesta inválida.");
         }
+    }
+
+    /**
+     * Redistributes element positions so nothing overlaps.
+     * Nodes (rect/circle/diamond) stack vertically centered.
+     * Arrows are placed between nodes pointing downward.
+     * Text/equations are placed to the right of their preceding node.
+     */
+    private void applyAutoLayout(List<Map<String, Object>> elements) {
+        if (elements.size() <= 1) {
+            if (!elements.isEmpty()) {
+                elements.get(0).put("x", 180);
+                elements.get(0).put("y", 90);
+            }
+            return;
+        }
+
+        // Separate nodes from arrows
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        List<Map<String, Object>> arrows = new ArrayList<>();
+
+        for (Map<String, Object> el : elements) {
+            String type = String.valueOf(el.getOrDefault("type", "text"));
+            if ("arrow".equals(type)) {
+                arrows.add(el);
+            } else {
+                nodes.add(el);
+            }
+        }
+
+        // Layout nodes vertically: start at y=50, spacing 80px, centered at x=180
+        int nodeY = 50;
+        int nodeX = 180;
+        int nodeSpacing = 80;
+
+        for (Map<String, Object> node : nodes) {
+            String type = String.valueOf(node.getOrDefault("type", "text"));
+            int width = node.get("width") instanceof Number w ? w.intValue() : defaultWidth(type);
+            node.put("x", nodeX - width / 2);
+            node.put("y", nodeY);
+            nodeY += nodeSpacing;
+        }
+
+        // Layout arrows between nodes (pointing downward)
+        if (!arrows.isEmpty() && nodes.size() >= 2) {
+            int arrowY = 50 + nodeSpacing - 30; // midpoint between first two nodes
+            for (Map<String, Object> arrow : arrows) {
+                arrow.put("x", nodeX - 4);
+                arrow.put("y", arrowY);
+                arrow.put("width", 0);
+                arrow.put("height", 30);
+                arrowY += nodeSpacing;
+            }
+        } else if (!arrows.isEmpty()) {
+            // Only one node or no nodes: just hide arrows off-screen (they add no value)
+            for (Map<String, Object> arrow : arrows) {
+                arrow.put("x", -999);
+                arrow.put("y", -999);
+            }
+        }
+    }
+
+    private int defaultWidth(String type) {
+        return switch (type) {
+            case "rect" -> 200;
+            case "circle", "diamond" -> 140;
+            case "equation" -> 160;
+            default -> 0; // text has no explicit width
+        };
     }
 
     private String extractJsonObject(String content) {

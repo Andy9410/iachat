@@ -39,6 +39,7 @@ public class ChatService {
     private final ToolRegistry toolRegistry;
     private final ToolExecutionContext toolExecutionContext;
     private final WhiteboardService whiteboardService;
+    private final ReasoningNodeService reasoningNodeService;
 
     public ChatService(LLMClient llmClient,
                        EmbeddingClient embeddingClient,
@@ -50,6 +51,7 @@ public class ChatService {
                        ToolRegistry toolRegistry,
                        ToolExecutionContext toolExecutionContext,
                        WhiteboardService whiteboardService,
+                       ReasoningNodeService reasoningNodeService,
                        ObjectMapper objectMapper) {
         this.llmClient = llmClient;
         this.embeddingClient = embeddingClient;
@@ -61,6 +63,7 @@ public class ChatService {
         this.toolRegistry = toolRegistry;
         this.toolExecutionContext = toolExecutionContext;
         this.whiteboardService = whiteboardService;
+        this.reasoningNodeService = reasoningNodeService;
         this.objectMapper = objectMapper;
     }
 
@@ -535,6 +538,9 @@ public class ChatService {
         if (conversationId != null) {
             String entriesCtx = whiteboardService.buildEntriesContext(conversationId);
             if (!entriesCtx.isBlank()) sb.append(entriesCtx);
+
+            String reasoningCtx = reasoningNodeService.buildReasoningContext(conversationId);
+            if (!reasoningCtx.isBlank()) sb.append(reasoningCtx);
         }
 
         if (!window.isEmpty()) {
@@ -564,6 +570,14 @@ public class ChatService {
               Cada bloque lleva type, content y orderIndex (1, 2, 3...).
               El LLM puede razonar sobre lo que ya inyectó en la pizarra en mensajes futuros.
             - update_whiteboard sigue disponible para agregar entradas simples sin metadata.
+
+            Razonamiento estructurado (Reasoning Graph):
+            - Cuando el usuario plantea un problema complejo (asignación, optimización, algoritmo,
+              demostración matemática), usá create_reasoning_node ANTES de resolver.
+            - Secuencia recomendada: PROBLEM → PLAN → un SUBPROBLEM por cada parte → FINAL_ANSWER.
+            - Si ya hay nodos en el Reasoning Graph, consultá su estado y continuá desde cualquier nodo.
+            - Después de resolver cada SUBPROBLEM, creá un SUBPROBLEM_SOLUTION como hijo.
+            - El FINAL_ANSWER siempre tiene parentNodeId apuntando al nodo PLAN o raíz del árbol.
             - exerciseText debe contener el enunciado más completo disponible a partir del mensaje y del material de estudio.
             - exerciseTitle debe ser el identificador más claro disponible, por ejemplo "Ejercicio 2".
             - userLevel debe mapearse a basico, intermedio o avanzado según el nivel de explicación actual.

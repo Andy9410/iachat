@@ -67,7 +67,7 @@ public class InjectWhiteboardContentTool implements ChatTool<InjectWhiteboardArg
     @Override
     public Object execute(InjectWhiteboardArgs args) {
         var ctx = context.require();
-        Long conversationId = args.conversationId() != null ? args.conversationId() : ctx.conversationId();
+        Long conversationId = ctx.conversationId(); // always use real context, never trust LLM args
 
         // Convert tool args to InjectWhiteboardRequest.BlockRequest
         List<InjectWhiteboardRequest.BlockRequest> blocks = args.blocks() == null ? List.of() :

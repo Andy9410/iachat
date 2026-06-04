@@ -61,7 +61,7 @@ public class UpdateWhiteboardTool implements ChatTool<UpdateWhiteboardArgs> {
         var ctx = context.require();
         List<WhiteboardEntryDto> saved = whiteboardService.addEntries(
                 args.whiteboardId(),
-                args.conversationId() != null ? args.conversationId() : ctx.conversationId(),
+                ctx.conversationId(), // always use real context, never trust LLM args
                 args.entries(),
                 ctx.userEmail()
         );

@@ -47,7 +47,7 @@ public class OpenWhiteboardTool implements ChatTool<OpenWhiteboardArgs> {
     public Object execute(OpenWhiteboardArgs args) {
         var ctx = context.require();
         var dto = whiteboardService.openForTeaching(
-                args.conversationId() != null ? args.conversationId() : ctx.conversationId(),
+                ctx.conversationId(), // always use the real context conversationId, never trust LLM args
                 args.title() != null ? args.title() : "Pizarra de enseñanza",
                 args.mode() != null ? args.mode() : "teaching",
                 ctx.userEmail()

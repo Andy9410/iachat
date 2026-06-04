@@ -65,7 +65,7 @@ public class CreateReasoningNodeTool implements ChatTool<CreateReasoningNodeArgs
     @Override
     public Object execute(CreateReasoningNodeArgs args) {
         var ctx = context.require();
-        Long conversationId = args.conversationId() != null ? args.conversationId() : ctx.conversationId();
+        Long conversationId = ctx.conversationId(); // always use real context, never trust LLM args
 
         // whiteboardId may come as string in some LLM implementations
         Long whiteboardId = args.whiteboardId() != null ? parseWhiteboardId(args.whiteboardId()) : null;

@@ -23,7 +23,7 @@ class WhiteboardServiceTest {
     void setUp() {
         // Creamos una instancia real con mocks mínimos para probar helpers puros
         // Los helpers privados que probamos no necesitan dependencias
-        service = new WhiteboardService(null, null, null, null, null);
+        service = new WhiteboardService(null, null, null, null, null, null);
     }
 
     // ── Helpers de reflexión ──────────────────────────────────────────────────

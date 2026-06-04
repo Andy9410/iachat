@@ -10,6 +10,8 @@ public record WhiteboardDto(
         String exerciseLabel,
         String title,
         Map<String, Object> data,
+        String mode,
+        String status,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

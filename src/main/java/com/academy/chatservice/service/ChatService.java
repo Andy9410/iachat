@@ -124,7 +124,8 @@ public class ChatService {
         boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
-                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation());
+                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation(),
+                conversation.getId());
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null, text,
                 request.explanationLevel(), request.activeWhiteboardId(), request.whiteboardInterpretation());
@@ -245,7 +246,8 @@ public class ChatService {
 
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
-                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation());
+                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation(),
+                conversation.getId());
 
         String llmResponse;
         boolean useRegisteredTools = llmClient.supportsToolCalling()
@@ -469,7 +471,8 @@ public class ChatService {
                                Integer explanationLevel, String firstName,
                                String archivedContext, Integer visiblePage,
                                String activeWhiteboardId,
-                               WhiteboardInterpretationResponse whiteboardInterpretation) {
+                               WhiteboardInterpretationResponse whiteboardInterpretation,
+                               Long conversationId) {
         String personalization = """
             [SISTEMA]
             El nombre del estudiante es %s.
@@ -529,6 +532,11 @@ public class ChatService {
             sb.append(buildWhiteboardContext(activeWhiteboardId, userEmail));
         }
 
+        if (conversationId != null) {
+            String entriesCtx = whiteboardService.buildEntriesContext(conversationId);
+            if (!entriesCtx.isBlank()) sb.append(entriesCtx);
+        }
+
         if (!window.isEmpty()) {
             sb.append("\nHistorial reciente:\n");
             for (Message m : window) {
@@ -544,6 +552,14 @@ public class ChatService {
             Si el estudiante pide ayuda paso a paso, guía progresiva, desglose de un ejercicio,
             explicación por etapas, o solicita resolver un ejercicio identificado del PDF, usá la tool
             break_down_exercise en lugar de responder como texto normal.
+
+            - Si el estudiante dice "explicame en la pizarra", "abrí la pizarra", "mostralo visualmente"
+              o pide una explicación paso a paso visual, llamá PRIMERO a open_whiteboard con conversationId,
+              title descriptivo y mode="teaching". LUEGO, en el mismo turn, llamá update_whiteboard para
+              escribir el contenido. Respondé al estudiante confirmando que ya está en la pizarra.
+            - update_whiteboard recibe entries: lista de objetos {type, content, orderIndex}.
+              Tipos válidos: TEXT, STEP, FORMULA, HIGHLIGHT, SYSTEM_NOTE.
+              Usá STEP para pasos numerados, FORMULA para expresiones matemáticas, TEXT para explicaciones.
             - exerciseText debe contener el enunciado más completo disponible a partir del mensaje y del material de estudio.
             - exerciseTitle debe ser el identificador más claro disponible, por ejemplo "Ejercicio 2".
             - userLevel debe mapearse a basico, intermedio o avanzado según el nivel de explicación actual.

@@ -1,6 +1,7 @@
 package com.academy.chatservice.controller;
 
 import com.academy.chatservice.model.*;
+import com.academy.chatservice.model.WhiteboardAction;
 import com.academy.chatservice.service.ChatService;
 import com.academy.chatservice.service.LLMClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -136,7 +137,26 @@ public class ChatController {
                     if (toolAwareResponse.hasToolCalls()) {
                         var toolCall = toolAwareResponse.toolCalls().get(0);
                         Object toolResult = chatService.executeToolCall(toolCall, userEmail, prep.conversationId());
-                        if (shouldContinueWithTextResponse(toolCall.name())) {
+
+                        // Whiteboard actions: emit SSE action event then continue with LLM text
+                        if (toolResult instanceof WhiteboardAction action) {
+                            log.info("[TOOLS] emitting whiteboard action conversation_id={} tool={} action={}",
+                                    prep.conversationId(), toolCall.name(), action.type());
+                            sse(writer, objectMapper.writeValueAsString(
+                                    java.util.Map.of("type", "action", "action", action)));
+                            String followUpPrompt = prep.prompt()
+                                    + "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
+                                    + objectMapper.writeValueAsString(action)
+                                    + "\n\nConfirmá al estudiante en una oración breve que la pizarra está lista. No repitas el JSON.\n";
+                            try {
+                                full.append(llmClient.generate(followUpPrompt));
+                            } catch (Exception e) {
+                                log.warn("Falló respuesta de confirmación para {}. Usando fallback.", toolCall.name());
+                                full.append("OPEN_WHITEBOARD".equals(action.type())
+                                        ? "Abrí la pizarra. Podés verla a la derecha."
+                                        : "Actualicé la pizarra con el contenido.");
+                            }
+                        } else if (shouldContinueWithTextResponse(toolCall.name())) {
                             String toolPayload = objectMapper.writeValueAsString(toolResult);
                             String followUpPrompt = prep.prompt()
                                     + "\n\n[RESULTADO DE TOOL: " + toolCall.name() + "]\n"

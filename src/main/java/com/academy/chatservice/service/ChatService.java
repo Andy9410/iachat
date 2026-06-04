@@ -149,7 +149,17 @@ public class ChatService {
     }
 
     public boolean shouldUseRegisteredTools(StreamPrep prep) {
-        return prep != null && shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation());
+        if (prep == null) return false;
+        // Whiteboard active: tools always available
+        if (shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation())) return true;
+        // No active whiteboard: enable tools when the user explicitly requests one
+        // or when the message is a complex problem that benefits from structured reasoning
+        String msg = prep.userMessage() != null ? prep.userMessage().toLowerCase(java.util.Locale.ROOT) : "";
+        return msg.contains("pizarra") || msg.contains("whiteboard")
+                || msg.contains("explicame en") || msg.contains("explicá en")
+                || msg.contains("mostralo en") || msg.contains("razonamiento")
+                || msg.contains("paso a paso en") || msg.contains("dibuja")
+                || msg.contains("abrí la") || msg.contains("abri la");
     }
 
     public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {

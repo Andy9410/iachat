@@ -6,5 +6,6 @@ public record WhiteboardEntryDto(
         Long conversationId,
         String type,
         String content,
-        int orderIndex
+        int orderIndex,
+        String metadata
 ) {}

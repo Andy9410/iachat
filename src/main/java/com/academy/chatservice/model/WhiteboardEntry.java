@@ -27,6 +27,10 @@ public class WhiteboardEntry {
     @Column(name = "order_index", nullable = false)
     private int orderIndex;
 
+    /** Optional JSON metadata, e.g. {"source":"llm","conversationMessageId":999} */
+    @Column(columnDefinition = "TEXT")
+    private String metadata;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -54,6 +58,8 @@ public class WhiteboardEntry {
     public void setContent(String content) { this.content = content; }
     public int getOrderIndex() { return orderIndex; }
     public void setOrderIndex(int orderIndex) { this.orderIndex = orderIndex; }
+    public String getMetadata() { return metadata; }
+    public void setMetadata(String metadata) { this.metadata = metadata; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

@@ -554,12 +554,16 @@ public class ChatService {
             break_down_exercise en lugar de responder como texto normal.
 
             - Si el estudiante dice "explicame en la pizarra", "abrí la pizarra", "mostralo visualmente"
-              o pide una explicación paso a paso visual, llamá PRIMERO a open_whiteboard con conversationId,
-              title descriptivo y mode="teaching". LUEGO, en el mismo turn, llamá update_whiteboard para
-              escribir el contenido. Respondé al estudiante confirmando que ya está en la pizarra.
-            - update_whiteboard recibe entries: lista de objetos {type, content, orderIndex}.
-              Tipos válidos: TEXT, STEP, FORMULA, HIGHLIGHT, SYSTEM_NOTE.
-              Usá STEP para pasos numerados, FORMULA para expresiones matemáticas, TEXT para explicaciones.
+              o pide una explicación paso a paso visual:
+              1. Llamá PRIMERO open_whiteboard con conversationId, title descriptivo y mode="teaching".
+              2. Luego llamá inject_whiteboard_content con los bloques de la explicación.
+              3. Respondé al estudiante confirmando que ya está en la pizarra.
+            - inject_whiteboard_content fragmenta el contenido en bloques pequeños y los persiste.
+              Tipos de bloque: TITLE (título), TEXT (párrafo), STEP (paso numerado), FORMULA (expresión),
+              EXAMPLE (ejemplo), WARNING (advertencia), QUESTION (pregunta al estudiante), SYSTEM_NOTE.
+              Cada bloque lleva type, content y orderIndex (1, 2, 3...).
+              El LLM puede razonar sobre lo que ya inyectó en la pizarra en mensajes futuros.
+            - update_whiteboard sigue disponible para agregar entradas simples sin metadata.
             - exerciseText debe contener el enunciado más completo disponible a partir del mensaje y del material de estudio.
             - exerciseTitle debe ser el identificador más claro disponible, por ejemplo "Ejercicio 2".
             - userLevel debe mapearse a basico, intermedio o avanzado según el nivel de explicación actual.

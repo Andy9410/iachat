@@ -1,6 +1,7 @@
 package com.academy.chatservice.service;
 
 import com.academy.chatservice.model.*;
+import com.academy.chatservice.model.InjectWhiteboardRequest;
 import com.academy.chatservice.model.tools.UpdateWhiteboardArgs;
 import com.academy.chatservice.repository.ConversationRepository;
 import com.academy.chatservice.repository.WhiteboardEntryRepository;
@@ -293,22 +294,66 @@ public class WhiteboardService {
                 .stream().map(this::toEntryDto).toList();
     }
 
+    @Transactional
+    public List<WhiteboardEntryDto> injectBlocks(String whiteboardId, Long conversationId,
+                                                  List<InjectWhiteboardRequest.BlockRequest> blocks,
+                                                  String userEmail) {
+        Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);
+        requireConversation(conversationId, userEmail);
+        if (!whiteboard.getConversation().getId().equals(conversationId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "La pizarra no pertenece a esta conversación");
+        }
+        if (blocks == null || blocks.isEmpty()) return List.of();
+
+        // Auto-append: determine the next orderIndex from what's already saved
+        int baseIndex = entryRepository.findMaxOrderIndexByWhiteboardId(whiteboard.getId()) + 1;
+
+        List<WhiteboardEntry> saved = new ArrayList<>();
+        for (var block : blocks) {
+            WhiteboardEntry entry = new WhiteboardEntry();
+            entry.setWhiteboard(whiteboard);
+            entry.setConversationId(conversationId);
+            entry.setType(normalizeBlockType(block.type()));
+            entry.setContent(block.content() != null ? block.content() : "");
+            // If caller provides orderIndex > 0 use it offset by baseIndex, else auto-increment
+            entry.setOrderIndex(block.orderIndex() > 0 ? baseIndex + block.orderIndex() - 1 : baseIndex + saved.size());
+            if (block.metadata() != null && !block.metadata().isEmpty()) {
+                entry.setMetadata(writeMetadata(block.metadata()));
+            }
+            saved.add(entryRepository.save(entry));
+        }
+        return saved.stream().map(this::toEntryDto).toList();
+    }
+
     public String buildEntriesContext(Long conversationId) {
         var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
         if (entries.isEmpty()) return "";
 
-        var sb = new StringBuilder("\n[PIZARRA DE ENSEÑANZA]\n");
+        var sb = new StringBuilder("\nPizarra activa de esta conversación:\n\n");
+        int blockNum = 1;
         for (var e : entries) {
-            String prefix = switch (e.getType()) {
-                case "STEP" -> "Paso " + (e.getOrderIndex() + 1) + ": ";
-                case "FORMULA" -> "Fórmula: ";
-                case "SYSTEM_NOTE" -> "Nota: ";
-                case "HIGHLIGHT" -> "Destacado: ";
-                default -> "";
-            };
-            sb.append(prefix).append(e.getContent()).append("\n");
+            sb.append("Bloque ").append(blockNum++).append(" [").append(e.getType()).append("]:\n");
+            sb.append(e.getContent()).append("\n\n");
         }
         return sb.toString();
+    }
+
+    private String normalizeBlockType(String type) {
+        if (type == null) return "TEXT";
+        return switch (type.toUpperCase()) {
+            case "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING",
+                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING" -> type.toUpperCase();
+            default -> "TEXT";
+        };
+    }
+
+    private String writeMetadata(java.util.Map<String, Object> metadata) {
+        try {
+            return objectMapper.writeValueAsString(metadata);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private WhiteboardEntryDto toEntryDto(WhiteboardEntry e) {
@@ -318,7 +363,8 @@ public class WhiteboardService {
                 e.getConversationId(),
                 e.getType(),
                 e.getContent(),
-                e.getOrderIndex()
+                e.getOrderIndex(),
+                e.getMetadata()
         );
     }
 

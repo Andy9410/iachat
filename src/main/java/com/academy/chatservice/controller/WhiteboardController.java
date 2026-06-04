@@ -1,5 +1,6 @@
 package com.academy.chatservice.controller;
 
+import com.academy.chatservice.model.InjectWhiteboardRequest;
 import com.academy.chatservice.model.WhiteboardDto;
 import com.academy.chatservice.model.WhiteboardEntriesRequest;
 import com.academy.chatservice.model.WhiteboardEntryDto;
@@ -88,6 +89,21 @@ public class WhiteboardController {
                 .map(e -> new com.academy.chatservice.model.tools.UpdateWhiteboardArgs.StepArg(e.type(), e.content(), e.orderIndex()))
                 .toList();
         return ResponseEntity.ok(whiteboardService.addEntries(whiteboardId, conversationId, argEntries, jwt.getSubject()));
+    }
+
+    /**
+     * Inyecta bloques de contenido estructurado en la pizarra.
+     * Los bloques se anexan respetando el orderIndex existente.
+     */
+    @PostMapping("/api/conversations/{conversationId}/whiteboards/{whiteboardId}/inject")
+    public ResponseEntity<List<WhiteboardEntryDto>> inject(
+            @PathVariable Long conversationId,
+            @PathVariable String whiteboardId,
+            @RequestBody InjectWhiteboardRequest request,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ResponseEntity.ok(
+                whiteboardService.injectBlocks(whiteboardId, conversationId, request.blocks(), jwt.getSubject()));
     }
 
     /** Lista las entradas de una pizarra ordenadas por orderIndex. */

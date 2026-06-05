@@ -216,21 +216,29 @@ public class ChatController {
                 } catch (Exception e) {
                     log.warn("[TOOLS] Falló tool calling conversation_id={} ({}). Reintentando sin tools.",
                             prep.conversationId(), e.getMessage());
-                    // Model doesn't support tool calling — fall back to plain streaming
-                    llmClient.generateStream(prep.prompt(), chunk -> {
-                        if (markerFound[0]) { full.append(chunk); return; }
-                        int prevLen = full.length();
-                        full.append(chunk);
-                        int markerIdx = full.indexOf("|||");
-                        String toSend = markerIdx >= 0
-                                ? (markerFound[0] = true) && markerIdx >= prevLen ? full.substring(prevLen, markerIdx) : ""
-                                : chunk;
-                        if (!toSend.isEmpty()) {
-                            sentContent.append(toSend);
-                            try { sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", toSend))); }
-                            catch (IOException ex) { throw new RuntimeException(ex); }
-                        }
-                    });
+                    // If user asked for whiteboard content, tell them to retry — don't dump full text in chat
+                    String msg = prep.userMessage() != null ? prep.userMessage().toLowerCase(java.util.Locale.ROOT) : "";
+                    boolean wantedWhiteboard = msg.contains("pizarra") || msg.contains("whiteboard")
+                            || msg.contains("explicame en") || msg.contains("mostralo en");
+                    if (wantedWhiteboard) {
+                        full.append("El servicio de pizarra está ocupado ahora mismo. "
+                                + "Intentá de nuevo en unos segundos con el mismo mensaje.");
+                    } else {
+                        llmClient.generateStream(prep.prompt(), chunk -> {
+                            if (markerFound[0]) { full.append(chunk); return; }
+                            int prevLen = full.length();
+                            full.append(chunk);
+                            int markerIdx = full.indexOf("|||");
+                            String toSend = markerIdx >= 0
+                                    ? (markerFound[0] = true) && markerIdx >= prevLen ? full.substring(prevLen, markerIdx) : ""
+                                    : chunk;
+                            if (!toSend.isEmpty()) {
+                                sentContent.append(toSend);
+                                try { sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", toSend))); }
+                                catch (IOException ex) { throw new RuntimeException(ex); }
+                            }
+                        });
+                    }
                 }
             } else {
                 llmClient.generateStream(prep.prompt(), chunk -> {

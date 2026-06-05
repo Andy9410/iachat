@@ -569,11 +569,13 @@ public class ChatService {
             explicación por etapas, o solicita resolver un ejercicio identificado del PDF, usá la tool
             break_down_exercise en lugar de responder como texto normal.
 
-            - Si el estudiante dice "explicame en la pizarra", "abrí la pizarra", "mostralo visualmente"
-              o pide una explicación paso a paso visual:
-              1. Llamá PRIMERO open_whiteboard con conversationId, title descriptivo y mode="teaching".
-              2. Luego llamá inject_whiteboard_content con los bloques de la explicación.
-              3. Respondé al estudiante confirmando que ya está en la pizarra.
+            REGLA CRÍTICA — Si el estudiante menciona "pizarra", "ejemplo en la pizarra",
+              "dame un ejemplo en la pizarra", "explicame en la pizarra", "mostralo en la pizarra"
+              o cualquier variante que pida contenido visual:
+              1. NUNCA respondas el contenido como texto en el chat.
+              2. Llamá PRIMERO open_whiteboard.
+              3. Luego llamá inject_whiteboard_content con TODO el contenido (título, pasos, fórmulas).
+              4. En el chat solo respondé UNA oración corta como "Ya lo escribí en la pizarra →".
             - inject_whiteboard_content fragmenta el contenido en bloques pequeños y los persiste.
               Tipos de bloque: TITLE (título), TEXT (párrafo), STEP (paso numerado), FORMULA (expresión),
               EXAMPLE (ejemplo), WARNING (advertencia), QUESTION (pregunta al estudiante), SYSTEM_NOTE.

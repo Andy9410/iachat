@@ -50,6 +50,11 @@ public class OpenRouterLLMClient implements LLMClient {
 
     public String visionModelName() { return freeModel(props.visionModel(), DEFAULT_FREE_VISION_MODEL); }
 
+    public String toolsModelName() {
+        String m = props.toolsModel();
+        return (m != null && !m.isBlank()) ? m.trim() : "meta-llama/llama-3.3-70b-instruct:free";
+    }
+
     @Override
     public boolean supportsToolCalling() { return true; }
 
@@ -219,7 +224,8 @@ public class OpenRouterLLMClient implements LLMClient {
     private Map<String, Object> buildRequestBody(String prompt, boolean stream, List<ToolDefinition> tools) {
         var messages = List.of(Map.of("role", "user", "content", prompt));
         var body = new java.util.LinkedHashMap<String, Object>();
-        body.put("model", modelName());
+        // Use tools-capable model when tools are present, fast model otherwise
+        body.put("model", (tools != null && !tools.isEmpty()) ? toolsModelName() : modelName());
         body.put("messages", messages);
         body.put("stream", stream);
         if (tools != null && !tools.isEmpty()) {

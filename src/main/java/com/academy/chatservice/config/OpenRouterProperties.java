@@ -9,6 +9,7 @@ public record OpenRouterProperties(
         @DefaultValue("liquid/lfm-2.5-1.2b-instruct:free") String model,
         @DefaultValue("google/gemma-4-26b-a4b-it:free") String visionModel,
         @DefaultValue("liquid/lfm-2.5-1.2b-instruct:free") String lessonModel,
+        @DefaultValue("meta-llama/llama-3.3-70b-instruct:free") String toolsModel,
         String apiKey,
         String whiteboardApiKey,
         @DefaultValue("false") boolean reasoningEnabled,

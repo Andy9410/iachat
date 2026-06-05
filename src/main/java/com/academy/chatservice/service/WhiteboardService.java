@@ -1,7 +1,10 @@
 package com.academy.chatservice.service;
 
 import com.academy.chatservice.model.*;
+import com.academy.chatservice.model.InjectWhiteboardRequest;
+import com.academy.chatservice.model.tools.UpdateWhiteboardArgs;
 import com.academy.chatservice.repository.ConversationRepository;
+import com.academy.chatservice.repository.WhiteboardEntryRepository;
 import com.academy.chatservice.repository.WhiteboardRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +23,7 @@ public class WhiteboardService {
 
     private final ConversationRepository conversationRepository;
     private final WhiteboardRepository whiteboardRepository;
+    private final WhiteboardEntryRepository entryRepository;
     private final ObjectMapper objectMapper;
     private final WhiteboardImageRenderer imageRenderer;
     private final WhiteboardInterpretService interpretService;
@@ -27,12 +31,14 @@ public class WhiteboardService {
     public WhiteboardService(
             ConversationRepository conversationRepository,
             WhiteboardRepository whiteboardRepository,
+            WhiteboardEntryRepository entryRepository,
             WhiteboardImageRenderer imageRenderer,
             WhiteboardInterpretService interpretService,
             ObjectMapper objectMapper
     ) {
         this.conversationRepository = conversationRepository;
         this.whiteboardRepository = whiteboardRepository;
+        this.entryRepository = entryRepository;
         this.imageRenderer = imageRenderer;
         this.interpretService = interpretService;
         this.objectMapper = objectMapper;
@@ -237,6 +243,131 @@ public class WhiteboardService {
         return "data:image/png;base64," + Base64.getEncoder().encodeToString(imageRenderer.renderPng(elements));
     }
 
+    // ─── Teaching whiteboard methods ────────────────────────────────────────
+
+    @Transactional
+    public WhiteboardDto openForTeaching(Long conversationId, String title, String mode, String userEmail) {
+        Conversation conversation = requireConversation(conversationId, userEmail);
+        // Reutilizar pizarra activa de enseñanza si existe
+        var existing = whiteboardRepository
+                .findFirstByConversationIdOrderByUpdatedAtDesc(conversationId)
+                .filter(w -> "teaching".equals(w.getMode()) && "ACTIVE".equals(w.getStatus()));
+        if (existing.isPresent()) return toDto(existing.get());
+
+        Whiteboard wb = new Whiteboard();
+        wb.setConversation(conversation);
+        wb.setTitle(title != null && !title.isBlank() ? title.trim() : "Pizarra de enseñanza");
+        wb.setMode(mode != null ? mode : "teaching");
+        wb.setStatus("ACTIVE");
+        wb.setData(writeData(EMPTY_DATA));
+        return toDto(whiteboardRepository.save(wb));
+    }
+
+    @Transactional
+    public List<WhiteboardEntryDto> addEntries(String whiteboardId, Long conversationId, List<UpdateWhiteboardArgs.StepArg> entries, String userEmail) {
+        Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);
+        requireConversation(conversationId, userEmail);
+        if (!whiteboard.getConversation().getId().equals(conversationId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "La pizarra no pertenece a esta conversación");
+        }
+        if (entries == null || entries.isEmpty()) return List.of();
+
+        List<WhiteboardEntry> saved = new ArrayList<>();
+        for (var e : entries) {
+            WhiteboardEntry entry = new WhiteboardEntry();
+            entry.setWhiteboard(whiteboard);
+            entry.setConversationId(conversationId);
+            entry.setType(e.type() != null ? e.type() : "TEXT");
+            entry.setContent(e.content() != null ? e.content() : "");
+            entry.setOrderIndex(e.orderIndex());
+            saved.add(entryRepository.save(entry));
+        }
+        return saved.stream().map(this::toEntryDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<WhiteboardEntryDto> getEntries(String whiteboardId, Long conversationId, String userEmail) {
+        Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);
+        requireConversation(conversationId, userEmail);
+        return entryRepository.findByWhiteboard_IdOrderByOrderIndexAsc(whiteboard.getId())
+                .stream().map(this::toEntryDto).toList();
+    }
+
+    @Transactional
+    public List<WhiteboardEntryDto> injectBlocks(String whiteboardId, Long conversationId,
+                                                  List<InjectWhiteboardRequest.BlockRequest> blocks,
+                                                  String userEmail) {
+        Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);
+        requireConversation(conversationId, userEmail);
+        if (!whiteboard.getConversation().getId().equals(conversationId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "La pizarra no pertenece a esta conversación");
+        }
+        if (blocks == null || blocks.isEmpty()) return List.of();
+
+        // Auto-append: determine the next orderIndex from what's already saved
+        int baseIndex = entryRepository.findMaxOrderIndexByWhiteboardId(whiteboard.getId()) + 1;
+
+        List<WhiteboardEntry> saved = new ArrayList<>();
+        for (var block : blocks) {
+            WhiteboardEntry entry = new WhiteboardEntry();
+            entry.setWhiteboard(whiteboard);
+            entry.setConversationId(conversationId);
+            entry.setType(normalizeBlockType(block.type()));
+            entry.setContent(block.content() != null ? block.content() : "");
+            // If caller provides orderIndex > 0 use it offset by baseIndex, else auto-increment
+            entry.setOrderIndex(block.orderIndex() > 0 ? baseIndex + block.orderIndex() - 1 : baseIndex + saved.size());
+            if (block.metadata() != null && !block.metadata().isEmpty()) {
+                entry.setMetadata(writeMetadata(block.metadata()));
+            }
+            saved.add(entryRepository.save(entry));
+        }
+        return saved.stream().map(this::toEntryDto).toList();
+    }
+
+    public String buildEntriesContext(Long conversationId) {
+        var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
+        if (entries.isEmpty()) return "";
+
+        var sb = new StringBuilder("\nPizarra activa de esta conversación:\n\n");
+        int blockNum = 1;
+        for (var e : entries) {
+            sb.append("Bloque ").append(blockNum++).append(" [").append(e.getType()).append("]:\n");
+            sb.append(e.getContent()).append("\n\n");
+        }
+        return sb.toString();
+    }
+
+    private String normalizeBlockType(String type) {
+        if (type == null) return "TEXT";
+        return switch (type.toUpperCase()) {
+            case "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING",
+                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING" -> type.toUpperCase();
+            default -> "TEXT";
+        };
+    }
+
+    private String writeMetadata(java.util.Map<String, Object> metadata) {
+        try {
+            return objectMapper.writeValueAsString(metadata);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private WhiteboardEntryDto toEntryDto(WhiteboardEntry e) {
+        return new WhiteboardEntryDto(
+                e.getId(),
+                toPublicId(e.getWhiteboard().getId()),
+                e.getConversationId(),
+                e.getType(),
+                e.getContent(),
+                e.getOrderIndex(),
+                e.getMetadata()
+        );
+    }
+
     public WhiteboardDto toDto(Whiteboard whiteboard) {
         return new WhiteboardDto(
                 toPublicId(whiteboard.getId()),
@@ -245,6 +376,8 @@ public class WhiteboardService {
                 whiteboard.getExerciseLabel(),
                 whiteboard.getTitle(),
                 readData(whiteboard.getData()),
+                whiteboard.getMode(),
+                whiteboard.getStatus(),
                 whiteboard.getCreatedAt(),
                 whiteboard.getUpdatedAt()
         );

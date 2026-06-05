@@ -1,6 +1,7 @@
 package com.academy.chatservice.controller;
 
 import com.academy.chatservice.model.*;
+import com.academy.chatservice.model.WhiteboardAction;
 import com.academy.chatservice.service.ChatService;
 import com.academy.chatservice.service.LLMClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -136,7 +137,55 @@ public class ChatController {
                     if (toolAwareResponse.hasToolCalls()) {
                         var toolCall = toolAwareResponse.toolCalls().get(0);
                         Object toolResult = chatService.executeToolCall(toolCall, userEmail, prep.conversationId());
-                        if (shouldContinueWithTextResponse(toolCall.name())) {
+
+                        // Whiteboard actions: emit SSE action, then give LLM a second round to inject content
+                        if (toolResult instanceof WhiteboardAction action) {
+                            log.info("[TOOLS] emitting whiteboard action conversation_id={} tool={} action={}",
+                                    prep.conversationId(), toolCall.name(), action.type());
+                            sse(writer, objectMapper.writeValueAsString(
+                                    java.util.Map.of("type", "action", "action", action)));
+
+                            String actionContext = "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
+                                    + objectMapper.writeValueAsString(action);
+
+                            // If whiteboard was just opened, give LLM another chance to inject content
+                            String roundTwoPrompt = prep.prompt() + actionContext;
+                            if ("OPEN_WHITEBOARD".equals(action.type())) {
+                                Object wbId = action.payload().get("whiteboardId");
+                                roundTwoPrompt += "\n\nLa pizarra ya está abierta (whiteboardId=" + wbId
+                                        + ", conversationId=" + prep.conversationId() + ")."
+                                        + " Ahora inyectá el contenido completo usando inject_whiteboard_content."
+                                        + " Fragmentá en bloques: TITLE, TEXT, STEP, FORMULA según corresponda."
+                                        + " Después de inyectar, confirmá brevemente al estudiante.";
+                                try {
+                                    var injectResponse = chatService.generateWithRegisteredTools(roundTwoPrompt);
+                                    if (injectResponse.hasToolCalls()) {
+                                        var injectCall = injectResponse.toolCalls().get(0);
+                                        Object injectResult = chatService.executeToolCall(injectCall, userEmail, prep.conversationId());
+                                        if (injectResult instanceof WhiteboardAction injectAction) {
+                                            log.info("[TOOLS] emitting inject action conversation_id={} tool={} action={}",
+                                                    prep.conversationId(), injectCall.name(), injectAction.type());
+                                            sse(writer, objectMapper.writeValueAsString(
+                                                    java.util.Map.of("type", "action", "action", injectAction)));
+                                            roundTwoPrompt += "\n\n[ACCIÓN EJECUTADA: " + injectCall.name() + "]\n"
+                                                    + objectMapper.writeValueAsString(injectAction);
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    log.warn("[TOOLS] Falló segundo round de tools para OPEN_WHITEBOARD: {}", e.getMessage());
+                                }
+                            }
+
+                            try {
+                                full.append(llmClient.generate(roundTwoPrompt
+                                        + "\n\nRespondé al estudiante en una oración breve confirmando lo que hiciste. No repitas JSON.\n"));
+                            } catch (Exception e) {
+                                log.warn("Falló respuesta de confirmación para {}. Usando fallback.", toolCall.name());
+                                full.append("OPEN_WHITEBOARD".equals(action.type())
+                                        ? "Abrí la pizarra con el contenido. Podés verla a la derecha."
+                                        : "Actualicé la pizarra con el contenido.");
+                            }
+                        } else if (shouldContinueWithTextResponse(toolCall.name())) {
                             String toolPayload = objectMapper.writeValueAsString(toolResult);
                             String followUpPrompt = prep.prompt()
                                     + "\n\n[RESULTADO DE TOOL: " + toolCall.name() + "]\n"
@@ -165,9 +214,23 @@ public class ChatController {
                         full.append(toolAwareResponse.content());
                     }
                 } catch (Exception e) {
-                    log.warn("Falló llamada LLM con tools. Se devuelve fallback controlado conversation_id={}: {}",
+                    log.warn("[TOOLS] Falló tool calling conversation_id={} ({}). Reintentando sin tools.",
                             prep.conversationId(), e.getMessage());
-                    full.append(buildModelFallbackResponse(prep));
+                    // Model doesn't support tool calling — fall back to plain streaming
+                    llmClient.generateStream(prep.prompt(), chunk -> {
+                        if (markerFound[0]) { full.append(chunk); return; }
+                        int prevLen = full.length();
+                        full.append(chunk);
+                        int markerIdx = full.indexOf("|||");
+                        String toSend = markerIdx >= 0
+                                ? (markerFound[0] = true) && markerIdx >= prevLen ? full.substring(prevLen, markerIdx) : ""
+                                : chunk;
+                        if (!toSend.isEmpty()) {
+                            sentContent.append(toSend);
+                            try { sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", toSend))); }
+                            catch (IOException ex) { throw new RuntimeException(ex); }
+                        }
+                    });
                 }
             } else {
                 llmClient.generateStream(prep.prompt(), chunk -> {
@@ -474,7 +537,7 @@ public class ChatController {
             }
             return sb.toString();
         }
-        return "OpenRouter está limitando las solicitudes en este momento. Intentá de nuevo en unos segundos.";
+        return "El servicio de IA no está disponible en este momento. Intentá de nuevo en unos segundos.";
     }
 
     @PostMapping("/api/conversations/{id}/active-document")

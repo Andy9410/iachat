@@ -50,6 +50,11 @@ public class OpenRouterLLMClient implements LLMClient {
 
     public String visionModelName() { return freeModel(props.visionModel(), DEFAULT_FREE_VISION_MODEL); }
 
+    public String toolsModelName() {
+        String m = props.toolsModel();
+        return (m != null && !m.isBlank()) ? m.trim() : "meta-llama/llama-3.3-70b-instruct:free";
+    }
+
     @Override
     public boolean supportsToolCalling() { return true; }
 
@@ -118,25 +123,60 @@ public class OpenRouterLLMClient implements LLMClient {
 
     @Override
     public LLMToolResponse generateWithTools(String prompt, List<ToolDefinition> tools) {
-        try {
-            var body = objectMapper.writeValueAsString(buildRequestBody(prompt, false, tools));
-            var response = sendString(body, apiKeyForPrompt(prompt));
+        int maxRetries = 3;
+        int[] delaySeconds = {5, 15, 30};
+        Exception lastError = null;
 
-            if (response.statusCode() != 200) {
-                log.error("OpenRouter respondió con status {} usando tools: {}", response.statusCode(), response.body());
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
+        for (int attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    int delay = delaySeconds[attempt - 1];
+                    log.info("[TOOLS] Reintento {} de {} para tool calling (espera {}s)", attempt, maxRetries, delay);
+                    Thread.sleep(delay * 1000L);
+                }
+
+                var body = objectMapper.writeValueAsString(buildRequestBody(prompt, false, tools));
+                var response = sendString(body, apiKeyForPrompt(prompt));
+
+                if (response.statusCode() == 429) {
+                    // Extract retry_after from response if available
+                    try {
+                        JsonNode err = objectMapper.readTree(response.body());
+                        int retryAfter = err.path("error").path("metadata").path("retry_after_seconds").asInt(delaySeconds[Math.min(attempt, delaySeconds.length - 1)]);
+                        log.warn("[TOOLS] Rate limit en intento {}. Esperando {}s", attempt + 1, retryAfter);
+                        Thread.sleep(retryAfter * 1000L);
+                    } catch (Exception ignored) {}
+                    lastError = new RuntimeException("Rate limit (429)");
+                    continue;
+                }
+
+                if (response.statusCode() != 200) {
+                    log.error("[TOOLS] OpenRouter respondió con status {} usando tools: {}", response.statusCode(),
+                            response.body().substring(0, Math.min(200, response.body().length())));
+                    throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
+                }
+
+                JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
+                return parseToolResponse(message);
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Request a OpenRouter interrumpido", e);
+            } catch (RuntimeException e) {
+                if (e.getMessage() != null && e.getMessage().contains("Rate limit")) {
+                    lastError = e;
+                } else {
+                    log.error("[TOOLS] Error llamando a OpenRouter con tools: {}", e.getMessage());
+                    throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
+                }
+            } catch (Exception e) {
+                log.error("[TOOLS] Error llamando a OpenRouter con tools: {}", e.getMessage(), e);
+                throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
             }
+        } // end retry loop
 
-            JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
-            return parseToolResponse(message);
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Request a OpenRouter interrumpido", e);
-        } catch (Exception e) {
-            log.error("Error llamando a OpenRouter con tools: {}", e.getMessage(), e);
-            throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
-        }
+        log.error("[TOOLS] Agotados {} reintentos por rate limit en tool calling", maxRetries);
+        throw new RuntimeException("Error al llamar a OpenRouter con tools", lastError);
     }
 
     public WhiteboardInterpretationResponse interpretWhiteboardImage(String imageBase64, String whiteboardId) {
@@ -219,7 +259,8 @@ public class OpenRouterLLMClient implements LLMClient {
     private Map<String, Object> buildRequestBody(String prompt, boolean stream, List<ToolDefinition> tools) {
         var messages = List.of(Map.of("role", "user", "content", prompt));
         var body = new java.util.LinkedHashMap<String, Object>();
-        body.put("model", modelName());
+        // Use tools-capable model when tools are present, fast model otherwise
+        body.put("model", (tools != null && !tools.isEmpty()) ? toolsModelName() : modelName());
         body.put("messages", messages);
         body.put("stream", stream);
         if (tools != null && !tools.isEmpty()) {

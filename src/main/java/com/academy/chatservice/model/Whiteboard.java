@@ -27,6 +27,12 @@ public class Whiteboard {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String data;
 
+    @Column(nullable = false)
+    private String mode = "default";
+
+    @Column(nullable = false)
+    private String status = "ACTIVE";
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -56,6 +62,10 @@ public class Whiteboard {
     public void setTitle(String title) { this.title = title; }
     public String getData() { return data; }
     public void setData(String data) { this.data = data; }
+    public String getMode() { return mode; }
+    public void setMode(String mode) { this.mode = mode; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

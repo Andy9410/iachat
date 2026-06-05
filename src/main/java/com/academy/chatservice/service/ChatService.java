@@ -39,6 +39,7 @@ public class ChatService {
     private final ToolRegistry toolRegistry;
     private final ToolExecutionContext toolExecutionContext;
     private final WhiteboardService whiteboardService;
+    private final ReasoningNodeService reasoningNodeService;
 
     public ChatService(LLMClient llmClient,
                        EmbeddingClient embeddingClient,
@@ -50,6 +51,7 @@ public class ChatService {
                        ToolRegistry toolRegistry,
                        ToolExecutionContext toolExecutionContext,
                        WhiteboardService whiteboardService,
+                       ReasoningNodeService reasoningNodeService,
                        ObjectMapper objectMapper) {
         this.llmClient = llmClient;
         this.embeddingClient = embeddingClient;
@@ -61,6 +63,7 @@ public class ChatService {
         this.toolRegistry = toolRegistry;
         this.toolExecutionContext = toolExecutionContext;
         this.whiteboardService = whiteboardService;
+        this.reasoningNodeService = reasoningNodeService;
         this.objectMapper = objectMapper;
     }
 
@@ -124,7 +127,8 @@ public class ChatService {
         boolean includeArchived = Boolean.TRUE.equals(request.includeFullHistory());
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
-                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation());
+                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation(),
+                conversation.getId());
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null, text,
                 request.explanationLevel(), request.activeWhiteboardId(), request.whiteboardInterpretation());
@@ -145,7 +149,17 @@ public class ChatService {
     }
 
     public boolean shouldUseRegisteredTools(StreamPrep prep) {
-        return prep != null && shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation());
+        if (prep == null) return false;
+        // Whiteboard active: tools always available
+        if (shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation())) return true;
+        // No active whiteboard: enable tools when the user explicitly requests one
+        // or when the message is a complex problem that benefits from structured reasoning
+        String msg = prep.userMessage() != null ? prep.userMessage().toLowerCase(java.util.Locale.ROOT) : "";
+        return msg.contains("pizarra") || msg.contains("whiteboard")
+                || msg.contains("explicame en") || msg.contains("explicá en")
+                || msg.contains("mostralo en") || msg.contains("razonamiento")
+                || msg.contains("paso a paso en") || msg.contains("dibuja")
+                || msg.contains("abrí la") || msg.contains("abri la");
     }
 
     public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {
@@ -245,7 +259,8 @@ public class ChatService {
 
         String prompt = buildPrompt(text, conversation.getSummary(), window, similar, docChunks, docId, userEmail,
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
-                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation());
+                request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation(),
+                conversation.getId());
 
         String llmResponse;
         boolean useRegisteredTools = llmClient.supportsToolCalling()
@@ -469,7 +484,8 @@ public class ChatService {
                                Integer explanationLevel, String firstName,
                                String archivedContext, Integer visiblePage,
                                String activeWhiteboardId,
-                               WhiteboardInterpretationResponse whiteboardInterpretation) {
+                               WhiteboardInterpretationResponse whiteboardInterpretation,
+                               Long conversationId) {
         String personalization = """
             [SISTEMA]
             El nombre del estudiante es %s.
@@ -529,6 +545,14 @@ public class ChatService {
             sb.append(buildWhiteboardContext(activeWhiteboardId, userEmail));
         }
 
+        if (conversationId != null) {
+            String entriesCtx = whiteboardService.buildEntriesContext(conversationId);
+            if (!entriesCtx.isBlank()) sb.append(entriesCtx);
+
+            String reasoningCtx = reasoningNodeService.buildReasoningContext(conversationId);
+            if (!reasoningCtx.isBlank()) sb.append(reasoningCtx);
+        }
+
         if (!window.isEmpty()) {
             sb.append("\nHistorial reciente:\n");
             for (Message m : window) {
@@ -544,6 +568,26 @@ public class ChatService {
             Si el estudiante pide ayuda paso a paso, guía progresiva, desglose de un ejercicio,
             explicación por etapas, o solicita resolver un ejercicio identificado del PDF, usá la tool
             break_down_exercise en lugar de responder como texto normal.
+
+            - Si el estudiante dice "explicame en la pizarra", "abrí la pizarra", "mostralo visualmente"
+              o pide una explicación paso a paso visual:
+              1. Llamá PRIMERO open_whiteboard con conversationId, title descriptivo y mode="teaching".
+              2. Luego llamá inject_whiteboard_content con los bloques de la explicación.
+              3. Respondé al estudiante confirmando que ya está en la pizarra.
+            - inject_whiteboard_content fragmenta el contenido en bloques pequeños y los persiste.
+              Tipos de bloque: TITLE (título), TEXT (párrafo), STEP (paso numerado), FORMULA (expresión),
+              EXAMPLE (ejemplo), WARNING (advertencia), QUESTION (pregunta al estudiante), SYSTEM_NOTE.
+              Cada bloque lleva type, content y orderIndex (1, 2, 3...).
+              El LLM puede razonar sobre lo que ya inyectó en la pizarra en mensajes futuros.
+            - update_whiteboard sigue disponible para agregar entradas simples sin metadata.
+
+            Razonamiento estructurado (Reasoning Graph):
+            - Cuando el usuario plantea un problema complejo (asignación, optimización, algoritmo,
+              demostración matemática), usá create_reasoning_node ANTES de resolver.
+            - Secuencia recomendada: PROBLEM → PLAN → un SUBPROBLEM por cada parte → FINAL_ANSWER.
+            - Si ya hay nodos en el Reasoning Graph, consultá su estado y continuá desde cualquier nodo.
+            - Después de resolver cada SUBPROBLEM, creá un SUBPROBLEM_SOLUTION como hijo.
+            - El FINAL_ANSWER siempre tiene parentNodeId apuntando al nodo PLAN o raíz del árbol.
             - exerciseText debe contener el enunciado más completo disponible a partir del mensaje y del material de estudio.
             - exerciseTitle debe ser el identificador más claro disponible, por ejemplo "Ejercicio 2".
             - userLevel debe mapearse a basico, intermedio o avanzado según el nivel de explicación actual.

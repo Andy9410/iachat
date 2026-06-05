@@ -523,7 +523,7 @@ public class ChatController {
             }
             return sb.toString();
         }
-        return "OpenRouter está limitando las solicitudes en este momento. Intentá de nuevo en unos segundos.";
+        return "El servicio de IA no está disponible en este momento. Intentá de nuevo en unos segundos.";
     }
 
     @PostMapping("/api/conversations/{id}/active-document")

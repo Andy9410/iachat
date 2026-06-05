@@ -214,9 +214,23 @@ public class ChatController {
                         full.append(toolAwareResponse.content());
                     }
                 } catch (Exception e) {
-                    log.warn("Falló llamada LLM con tools. Se devuelve fallback controlado conversation_id={}: {}",
+                    log.warn("[TOOLS] Falló tool calling conversation_id={} ({}). Reintentando sin tools.",
                             prep.conversationId(), e.getMessage());
-                    full.append(buildModelFallbackResponse(prep));
+                    // Model doesn't support tool calling — fall back to plain streaming
+                    llmClient.generateStream(prep.prompt(), chunk -> {
+                        if (markerFound[0]) { full.append(chunk); return; }
+                        int prevLen = full.length();
+                        full.append(chunk);
+                        int markerIdx = full.indexOf("|||");
+                        String toSend = markerIdx >= 0
+                                ? (markerFound[0] = true) && markerIdx >= prevLen ? full.substring(prevLen, markerIdx) : ""
+                                : chunk;
+                        if (!toSend.isEmpty()) {
+                            sentContent.append(toSend);
+                            try { sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", toSend))); }
+                            catch (IOException ex) { throw new RuntimeException(ex); }
+                        }
+                    });
                 }
             } else {
                 llmClient.generateStream(prep.prompt(), chunk -> {

@@ -386,6 +386,90 @@ public class WhiteboardService {
         return sb.toString();
     }
 
+    // ─── Teaching session (incremental, socratic) ───────────────────────────
+
+    /** Builds the LLM prompt for generating a single teaching fragment. */
+    public String buildTeachingPrompt(Long conversationId, String userInput, int stepIndex, String topic) {
+        var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
+        var sb = new StringBuilder();
+
+        sb.append("Sos un tutor que da clases particulares en una pizarra digital.\n");
+        sb.append("Tu estilo es incremental y socrático: escribís un fragmento pequeño, hacés una pregunta, esperás al alumno y continuás.\n\n");
+
+        sb.append("REGLA OBLIGATORIA: Escribí SOLO el siguiente fragmento (máximo 3 bloques).\n");
+        sb.append("Después del fragmento, formulá UNA pregunta socrática corta.\n");
+        sb.append("NO des toda la explicación de una vez. La IA escribe — pausa — alumno responde — IA continúa.\n\n");
+
+        if (topic != null && !topic.isBlank() && stepIndex == 0) {
+            sb.append("Tema a explicar: ").append(topic.trim()).append("\n\n");
+        }
+
+        if (!entries.isEmpty()) {
+            sb.append("Pizarra hasta ahora:\n");
+            for (var e : entries) {
+                String who = "user".equals(e.getAuthor()) ? "✏ Alumno" : "◆ IA";
+                sb.append("  [").append(who).append("][").append(e.getType()).append("] ")
+                  .append(e.getContent()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        if (stepIndex == 0) {
+            sb.append("Es el INICIO de la explicación. Comenzá con el primer concepto fundamental (título + 1-2 bloques máximo).\n\n");
+        } else if (userInput != null && !userInput.isBlank()) {
+            sb.append("El alumno respondió: \"").append(userInput.trim()).append("\"\n");
+            sb.append("Incorporá su aporte, validalo o corregilo brevemente, y luego escribí el siguiente fragmento.\n\n");
+        } else {
+            sb.append("El alumno eligió continuar sin responder. Avanzá al siguiente fragmento.\n\n");
+        }
+
+        sb.append("Respondé ÚNICAMENTE con un JSON válido (sin texto extra, sin markdown, sin backticks):\n");
+        sb.append("{\"blocks\":[{\"type\":\"TITLE|STEP|FORMULA|EXAMPLE|WARNING|TEXT\",\"content\":\"...\"}]");
+        sb.append(",\"question\":\"Pregunta socrática breve (o null si la explicación ya está completa)\",\"isComplete\":false}\n");
+
+        return sb.toString();
+    }
+
+    /** Record usado internamente para parsear la respuesta del LLM. */
+    public record TeachFragment(List<Map<String, String>> blocks, String question, boolean isComplete) {}
+
+    /** Extrae bloques + pregunta del JSON que devuelve el LLM. */
+    public TeachFragment parseTeachFragment(String raw) {
+        try {
+            int start = raw.indexOf('{');
+            int end   = raw.lastIndexOf('}');
+            if (start < 0 || end < 0) throw new IllegalArgumentException("No JSON found");
+            String json = raw.substring(start, end + 1);
+
+            var node = objectMapper.readTree(json);
+
+            List<Map<String, String>> blocks = new ArrayList<>();
+            var blocksNode = node.get("blocks");
+            if (blocksNode != null && blocksNode.isArray()) {
+                for (var b : blocksNode) {
+                    String type    = b.has("type")    ? b.get("type").asText("TEXT")    : "TEXT";
+                    String content = b.has("content") ? b.get("content").asText("")     : "";
+                    if (!content.isBlank()) blocks.add(Map.of("type", type, "content", content));
+                }
+            }
+
+            String question = null;
+            if (node.has("question") && !node.get("question").isNull()) {
+                String q = node.get("question").asText("").trim();
+                if (!q.isBlank()) question = q;
+            }
+            boolean isComplete = node.has("isComplete") && node.get("isComplete").asBoolean(false);
+
+            if (blocks.isEmpty()) blocks.add(Map.of("type", "TEXT", "content", raw.trim()));
+            return new TeachFragment(blocks, question, isComplete || question == null);
+        } catch (Exception e) {
+            return new TeachFragment(
+                List.of(Map.of("type", "TEXT", "content", raw == null ? "" : raw.trim())),
+                null, true
+            );
+        }
+    }
+
     private String normalizeBlockType(String type) {
         if (type == null) return "TEXT";
         return switch (type.toUpperCase()) {

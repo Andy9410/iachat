@@ -6,6 +6,8 @@ import com.academy.chatservice.model.WhiteboardDto;
 import com.academy.chatservice.model.WhiteboardEntriesRequest;
 import com.academy.chatservice.model.WhiteboardEntryDto;
 import com.academy.chatservice.model.WhiteboardRequest;
+import com.academy.chatservice.model.WhiteboardTeachRequest;
+import com.academy.chatservice.model.WhiteboardTeachResponse;
 import com.academy.chatservice.service.LLMClient;
 import com.academy.chatservice.service.WhiteboardService;
 import org.springframework.http.ResponseEntity;
@@ -147,6 +149,49 @@ public class WhiteboardController {
         var block = new InjectWhiteboardRequest.BlockRequest(type, "assistant", aiResponse.trim(), 0, null);
         var saved = whiteboardService.injectBlocks(whiteboardId, conversationId, java.util.List.of(block), userEmail);
         return ResponseEntity.ok(saved.get(0));
+    }
+
+    /**
+     * Genera el siguiente fragmento de la explicación (modo clase particular incremental).
+     * Cada llamada produce 1-3 bloques + una pregunta socrática.
+     * El alumno responde → la IA incorpora su aporte y genera el siguiente fragmento.
+     */
+    @PostMapping("/api/conversations/{conversationId}/whiteboards/{whiteboardId}/teach")
+    public ResponseEntity<WhiteboardTeachResponse> teach(
+            @PathVariable Long conversationId,
+            @PathVariable String whiteboardId,
+            @RequestBody WhiteboardTeachRequest request,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String userEmail = jwt.getSubject();
+
+        String prompt = whiteboardService.buildTeachingPrompt(
+                conversationId, request.userInput(), request.stepIndex(), request.topic());
+
+        String raw;
+        try {
+            raw = llmClient.generate(prompt);
+            if (raw == null || raw.isBlank())
+                raw = "{\"blocks\":[{\"type\":\"TEXT\",\"content\":\"Continuemos...\"}],\"question\":null,\"isComplete\":true}";
+        } catch (Exception e) {
+            raw = "{\"blocks\":[{\"type\":\"TEXT\",\"content\":\"No se pudo generar el siguiente paso.\"}],\"question\":null,\"isComplete\":true}";
+        }
+
+        var fragment = whiteboardService.parseTeachFragment(raw);
+
+        List<InjectWhiteboardRequest.BlockRequest> blockRequests = fragment.blocks().stream()
+                .map(b -> new InjectWhiteboardRequest.BlockRequest(b.get("type"), "assistant", b.get("content"), 0, null))
+                .toList();
+
+        List<WhiteboardEntryDto> saved = whiteboardService.injectBlocks(
+                whiteboardId, conversationId, blockRequests, userEmail);
+
+        return ResponseEntity.ok(new WhiteboardTeachResponse(
+                saved,
+                fragment.question(),
+                fragment.isComplete(),
+                request.stepIndex() + 1
+        ));
     }
 
     /** Lista las entradas de una pizarra ordenadas por orderIndex. */

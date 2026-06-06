@@ -73,7 +73,7 @@ public class InjectWhiteboardContentTool implements ChatTool<InjectWhiteboardArg
         List<InjectWhiteboardRequest.BlockRequest> blocks = args.blocks() == null ? List.of() :
                 args.blocks().stream()
                         .map(b -> new InjectWhiteboardRequest.BlockRequest(
-                                b.type(), b.content(), b.orderIndex(), b.metadata()))
+                                b.type(), "assistant", b.content(), b.orderIndex(), b.metadata()))
                         .toList();
 
         List<WhiteboardEntryDto> saved = whiteboardService.injectBlocks(

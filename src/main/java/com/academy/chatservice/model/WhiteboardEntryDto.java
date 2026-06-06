@@ -5,6 +5,7 @@ public record WhiteboardEntryDto(
         String whiteboardId,
         Long conversationId,
         String type,
+        String author,
         String content,
         int orderIndex,
         String metadata

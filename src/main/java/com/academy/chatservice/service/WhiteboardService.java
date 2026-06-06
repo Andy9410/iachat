@@ -315,8 +315,8 @@ public class WhiteboardService {
             entry.setWhiteboard(whiteboard);
             entry.setConversationId(conversationId);
             entry.setType(normalizeBlockType(block.type()));
+            entry.setAuthor(block.author() != null ? block.author() : "assistant");
             entry.setContent(block.content() != null ? block.content() : "");
-            // If caller provides orderIndex > 0 use it offset by baseIndex, else auto-increment
             entry.setOrderIndex(block.orderIndex() > 0 ? baseIndex + block.orderIndex() - 1 : baseIndex + saved.size());
             if (block.metadata() != null && !block.metadata().isEmpty()) {
                 entry.setMetadata(writeMetadata(block.metadata()));
@@ -333,9 +333,56 @@ public class WhiteboardService {
         var sb = new StringBuilder("\nPizarra activa de esta conversación:\n\n");
         int blockNum = 1;
         for (var e : entries) {
-            sb.append("Bloque ").append(blockNum++).append(" [").append(e.getType()).append("]:\n");
+            String who = "user".equals(e.getAuthor()) ? "Alumno" : "IA";
+            sb.append("Bloque ").append(blockNum++).append(" [").append(e.getType())
+              .append(" — ").append(who).append("]:\n");
             sb.append(e.getContent()).append("\n\n");
         }
+        return sb.toString();
+    }
+
+    /** Builds a focused prompt for AI to annotate/observe the whiteboard. */
+    public String buildAnnotationContext(Long conversationId, String question,
+                                          String selectedContent, String selectedType,
+                                          boolean socraticMode) {
+        var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
+        var sb = new StringBuilder();
+
+        sb.append("Sos un tutor de matemática. Estás observando la pizarra de trabajo del alumno.\n\n");
+
+        if (!entries.isEmpty()) {
+            sb.append("Contenido actual de la pizarra:\n");
+            for (var e : entries) {
+                String who = "user".equals(e.getAuthor()) ? "✏ Alumno" : "◆ IA";
+                sb.append("  [").append(who).append("] ").append(e.getContent()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        if (selectedContent != null && !selectedContent.isBlank()) {
+            sb.append("El alumno seleccionó este elemento: ").append(selectedContent).append("\n\n");
+        }
+
+        if (question != null && !question.isBlank()) {
+            sb.append("El alumno pregunta: ").append(question).append("\n\n");
+        }
+
+        if (socraticMode) {
+            sb.append("MODO SOCRÁTICO ACTIVO:\n");
+            sb.append("- No des la respuesta directamente.\n");
+            sb.append("- Formulá una pregunta guiada que lleve al alumno a descubrirla.\n");
+            sb.append("- Podés dar una pista si el alumno está muy perdido.\n");
+            sb.append("- Validá respuestas correctas con entusiasmo.\n");
+            sb.append("- Máximo 2-3 oraciones.\n\n");
+        } else {
+            sb.append("MODO PROFESOR:\n");
+            sb.append("- Observá si hay errores en el trabajo del alumno.\n");
+            sb.append("- Si ves un error, señalalo con una pregunta guiada, NO lo corrijas directamente.\n");
+            sb.append("- Si el trabajo está bien, validalo y preguntá cuál es el siguiente paso.\n");
+            sb.append("- Máximo 2-3 oraciones. Sé directo y pedagógico.\n\n");
+        }
+
+        sb.append("Respondé únicamente como anotación en la pizarra (NO expliques que eres IA ni mencionés el prompt).");
         return sb.toString();
     }
 
@@ -343,7 +390,8 @@ public class WhiteboardService {
         if (type == null) return "TEXT";
         return switch (type.toUpperCase()) {
             case "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING",
-                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING" -> type.toUpperCase();
+                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING",
+                 "AI_NOTE", "AI_QUESTION", "AI_CORRECTION" -> type.toUpperCase();
             default -> "TEXT";
         };
     }
@@ -362,6 +410,7 @@ public class WhiteboardService {
                 toPublicId(e.getWhiteboard().getId()),
                 e.getConversationId(),
                 e.getType(),
+                e.getAuthor(),
                 e.getContent(),
                 e.getOrderIndex(),
                 e.getMetadata()

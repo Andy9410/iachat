@@ -21,13 +21,16 @@ public class WhiteboardEntry {
     @Column(nullable = false)
     private String type = "TEXT";
 
+    /** "user" = student, "assistant" = AI */
+    @Column(nullable = false)
+    private String author = "assistant";
+
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
     @Column(name = "order_index", nullable = false)
     private int orderIndex;
 
-    /** Optional JSON metadata, e.g. {"source":"llm","conversationMessageId":999} */
     @Column(columnDefinition = "TEXT")
     private String metadata;
 
@@ -54,6 +57,8 @@ public class WhiteboardEntry {
     public void setConversationId(Long conversationId) { this.conversationId = conversationId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+    public String getAuthor() { return author; }
+    public void setAuthor(String author) { this.author = author; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
     public int getOrderIndex() { return orderIndex; }

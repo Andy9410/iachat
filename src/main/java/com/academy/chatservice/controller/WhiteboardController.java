@@ -1,10 +1,12 @@
 package com.academy.chatservice.controller;
 
 import com.academy.chatservice.model.InjectWhiteboardRequest;
+import com.academy.chatservice.model.WhiteboardAnnotateRequest;
 import com.academy.chatservice.model.WhiteboardDto;
 import com.academy.chatservice.model.WhiteboardEntriesRequest;
 import com.academy.chatservice.model.WhiteboardEntryDto;
 import com.academy.chatservice.model.WhiteboardRequest;
+import com.academy.chatservice.service.LLMClient;
 import com.academy.chatservice.service.WhiteboardService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -17,9 +19,11 @@ import java.util.List;
 public class WhiteboardController {
 
     private final WhiteboardService whiteboardService;
+    private final LLMClient llmClient;
 
-    public WhiteboardController(WhiteboardService whiteboardService) {
+    public WhiteboardController(WhiteboardService whiteboardService, LLMClient llmClient) {
         this.whiteboardService = whiteboardService;
+        this.llmClient = llmClient;
     }
 
     @GetMapping("/api/conversations/{conversationId}/whiteboards")
@@ -104,6 +108,45 @@ public class WhiteboardController {
     ) {
         return ResponseEntity.ok(
                 whiteboardService.injectBlocks(whiteboardId, conversationId, request.blocks(), jwt.getSubject()));
+    }
+
+    /**
+     * Teacher mode / Socratic mode: AI observes the whiteboard and returns
+     * an annotation (AI_NOTE, AI_QUESTION, or AI_CORRECTION) injected as a block.
+     */
+    @PostMapping("/api/conversations/{conversationId}/whiteboards/{whiteboardId}/annotate")
+    public ResponseEntity<WhiteboardEntryDto> annotate(
+            @PathVariable Long conversationId,
+            @PathVariable String whiteboardId,
+            @RequestBody WhiteboardAnnotateRequest request,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String userEmail = jwt.getSubject();
+        String prompt = whiteboardService.buildAnnotationContext(
+                conversationId,
+                request.question(),
+                request.selectedContent(),
+                request.selectedType(),
+                request.socraticMode()
+        );
+
+        String aiResponse;
+        try {
+            aiResponse = llmClient.generate(prompt);
+            if (aiResponse == null || aiResponse.isBlank()) aiResponse = "¿Querés continuar?";
+        } catch (Exception e) {
+            aiResponse = "¿En qué paso estás trabajando?";
+        }
+
+        // Determine annotation type from content hints
+        String type = request.socraticMode() ? "AI_QUESTION" : "AI_NOTE";
+        if (request.selectedContent() != null && !request.selectedContent().isBlank()) {
+            type = "AI_QUESTION";
+        }
+
+        var block = new InjectWhiteboardRequest.BlockRequest(type, "assistant", aiResponse.trim(), 0, null);
+        var saved = whiteboardService.injectBlocks(whiteboardId, conversationId, java.util.List.of(block), userEmail);
+        return ResponseEntity.ok(saved.get(0));
     }
 
     /** Lista las entradas de una pizarra ordenadas por orderIndex. */

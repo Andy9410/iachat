@@ -315,8 +315,8 @@ public class WhiteboardService {
             entry.setWhiteboard(whiteboard);
             entry.setConversationId(conversationId);
             entry.setType(normalizeBlockType(block.type()));
+            entry.setAuthor(block.author() != null ? block.author() : "assistant");
             entry.setContent(block.content() != null ? block.content() : "");
-            // If caller provides orderIndex > 0 use it offset by baseIndex, else auto-increment
             entry.setOrderIndex(block.orderIndex() > 0 ? baseIndex + block.orderIndex() - 1 : baseIndex + saved.size());
             if (block.metadata() != null && !block.metadata().isEmpty()) {
                 entry.setMetadata(writeMetadata(block.metadata()));
@@ -333,17 +333,149 @@ public class WhiteboardService {
         var sb = new StringBuilder("\nPizarra activa de esta conversación:\n\n");
         int blockNum = 1;
         for (var e : entries) {
-            sb.append("Bloque ").append(blockNum++).append(" [").append(e.getType()).append("]:\n");
+            String who = "user".equals(e.getAuthor()) ? "Alumno" : "IA";
+            sb.append("Bloque ").append(blockNum++).append(" [").append(e.getType())
+              .append(" — ").append(who).append("]:\n");
             sb.append(e.getContent()).append("\n\n");
         }
         return sb.toString();
+    }
+
+    /** Builds a focused prompt for AI to annotate/observe the whiteboard. */
+    public String buildAnnotationContext(Long conversationId, String question,
+                                          String selectedContent, String selectedType,
+                                          boolean socraticMode) {
+        var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
+        var sb = new StringBuilder();
+
+        sb.append("Sos un tutor de matemática. Estás observando la pizarra de trabajo del alumno.\n\n");
+
+        if (!entries.isEmpty()) {
+            sb.append("Contenido actual de la pizarra:\n");
+            for (var e : entries) {
+                String who = "user".equals(e.getAuthor()) ? "✏ Alumno" : "◆ IA";
+                sb.append("  [").append(who).append("] ").append(e.getContent()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        if (selectedContent != null && !selectedContent.isBlank()) {
+            sb.append("El alumno seleccionó este elemento: ").append(selectedContent).append("\n\n");
+        }
+
+        if (question != null && !question.isBlank()) {
+            sb.append("El alumno pregunta: ").append(question).append("\n\n");
+        }
+
+        if (socraticMode) {
+            sb.append("MODO SOCRÁTICO ACTIVO:\n");
+            sb.append("- No des la respuesta directamente.\n");
+            sb.append("- Formulá una pregunta guiada que lleve al alumno a descubrirla.\n");
+            sb.append("- Podés dar una pista si el alumno está muy perdido.\n");
+            sb.append("- Validá respuestas correctas con entusiasmo.\n");
+            sb.append("- Máximo 2-3 oraciones.\n\n");
+        } else {
+            sb.append("MODO PROFESOR:\n");
+            sb.append("- Observá si hay errores en el trabajo del alumno.\n");
+            sb.append("- Si ves un error, señalalo con una pregunta guiada, NO lo corrijas directamente.\n");
+            sb.append("- Si el trabajo está bien, validalo y preguntá cuál es el siguiente paso.\n");
+            sb.append("- Máximo 2-3 oraciones. Sé directo y pedagógico.\n\n");
+        }
+
+        sb.append("Respondé únicamente como anotación en la pizarra (NO expliques que eres IA ni mencionés el prompt).");
+        return sb.toString();
+    }
+
+    // ─── Teaching session (incremental, socratic) ───────────────────────────
+
+    /** Builds the LLM prompt for generating a single teaching fragment. */
+    public String buildTeachingPrompt(Long conversationId, String userInput, int stepIndex, String topic) {
+        var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
+        var sb = new StringBuilder();
+
+        sb.append("Sos un tutor que da clases particulares en una pizarra digital.\n");
+        sb.append("Tu estilo es incremental y socrático: escribís un fragmento pequeño, hacés una pregunta, esperás al alumno y continuás.\n\n");
+
+        sb.append("REGLA OBLIGATORIA: Escribí SOLO el siguiente fragmento (máximo 3 bloques).\n");
+        sb.append("Después del fragmento, formulá UNA pregunta socrática corta.\n");
+        sb.append("NO des toda la explicación de una vez. La IA escribe — pausa — alumno responde — IA continúa.\n\n");
+
+        if (topic != null && !topic.isBlank() && stepIndex == 0) {
+            sb.append("Tema a explicar: ").append(topic.trim()).append("\n\n");
+        }
+
+        if (!entries.isEmpty()) {
+            sb.append("Pizarra hasta ahora:\n");
+            for (var e : entries) {
+                String who = "user".equals(e.getAuthor()) ? "✏ Alumno" : "◆ IA";
+                sb.append("  [").append(who).append("][").append(e.getType()).append("] ")
+                  .append(e.getContent()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        if (stepIndex == 0) {
+            sb.append("Es el INICIO de la explicación. Comenzá con el primer concepto fundamental (título + 1-2 bloques máximo).\n\n");
+        } else if (userInput != null && !userInput.isBlank()) {
+            sb.append("El alumno respondió: \"").append(userInput.trim()).append("\"\n");
+            sb.append("Incorporá su aporte, validalo o corregilo brevemente, y luego escribí el siguiente fragmento.\n\n");
+        } else {
+            sb.append("El alumno eligió continuar sin responder. Avanzá al siguiente fragmento.\n\n");
+        }
+
+        sb.append("Respondé ÚNICAMENTE con un JSON válido (sin texto extra, sin markdown, sin backticks):\n");
+        sb.append("{\"blocks\":[{\"type\":\"TITLE|STEP|FORMULA|EXAMPLE|WARNING|TEXT\",\"content\":\"...\"}]");
+        sb.append(",\"question\":\"Pregunta socrática breve (o null si la explicación ya está completa)\",\"isComplete\":false}\n");
+
+        return sb.toString();
+    }
+
+    /** Record usado internamente para parsear la respuesta del LLM. */
+    public record TeachFragment(List<Map<String, String>> blocks, String question, boolean isComplete) {}
+
+    /** Extrae bloques + pregunta del JSON que devuelve el LLM. */
+    public TeachFragment parseTeachFragment(String raw) {
+        try {
+            int start = raw.indexOf('{');
+            int end   = raw.lastIndexOf('}');
+            if (start < 0 || end < 0) throw new IllegalArgumentException("No JSON found");
+            String json = raw.substring(start, end + 1);
+
+            var node = objectMapper.readTree(json);
+
+            List<Map<String, String>> blocks = new ArrayList<>();
+            var blocksNode = node.get("blocks");
+            if (blocksNode != null && blocksNode.isArray()) {
+                for (var b : blocksNode) {
+                    String type    = b.has("type")    ? b.get("type").asText("TEXT")    : "TEXT";
+                    String content = b.has("content") ? b.get("content").asText("")     : "";
+                    if (!content.isBlank()) blocks.add(Map.of("type", type, "content", content));
+                }
+            }
+
+            String question = null;
+            if (node.has("question") && !node.get("question").isNull()) {
+                String q = node.get("question").asText("").trim();
+                if (!q.isBlank()) question = q;
+            }
+            boolean isComplete = node.has("isComplete") && node.get("isComplete").asBoolean(false);
+
+            if (blocks.isEmpty()) blocks.add(Map.of("type", "TEXT", "content", raw.trim()));
+            return new TeachFragment(blocks, question, isComplete || question == null);
+        } catch (Exception e) {
+            return new TeachFragment(
+                List.of(Map.of("type", "TEXT", "content", raw == null ? "" : raw.trim())),
+                null, true
+            );
+        }
     }
 
     private String normalizeBlockType(String type) {
         if (type == null) return "TEXT";
         return switch (type.toUpperCase()) {
             case "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING",
-                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING" -> type.toUpperCase();
+                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING",
+                 "AI_NOTE", "AI_QUESTION", "AI_CORRECTION" -> type.toUpperCase();
             default -> "TEXT";
         };
     }
@@ -362,6 +494,7 @@ public class WhiteboardService {
                 toPublicId(e.getWhiteboard().getId()),
                 e.getConversationId(),
                 e.getType(),
+                e.getAuthor(),
                 e.getContent(),
                 e.getOrderIndex(),
                 e.getMetadata()

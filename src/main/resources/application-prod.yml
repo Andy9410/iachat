@@ -3,6 +3,11 @@ spring:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE:require}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
+  flyway:
+    validate-on-migrate: false
+    out-of-order: false
+    baseline-on-migrate: true
+    baseline-version: 0
 
 llm:
   provider: ${LLM_PROVIDER:groq}

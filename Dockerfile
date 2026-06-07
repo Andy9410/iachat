@@ -14,4 +14,4 @@ COPY --from=build /app/target/chat-service-*.jar app.jar
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-Xmx200m", "-Dserver.port=8080", "-Dserver.address=0.0.0.0", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Xmx512m", "-Xms128m", "-Dserver.port=8080", "-Dserver.address=0.0.0.0", "-jar", "app.jar"]

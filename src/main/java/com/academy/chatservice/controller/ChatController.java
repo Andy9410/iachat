@@ -130,6 +130,18 @@ public class ChatController {
                 return;
             }
 
+            if (chatService.shouldOpenWhiteboardLocally(prep)) {
+                WhiteboardAction action = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
+                String answer = "Abrí la pizarra a la derecha. Podés usarla ahora y pedirme que agregue pasos o fórmulas.";
+                log.info("[TOOLS] emitting local whiteboard action conversation_id={} action={}",
+                        prep.conversationId(), action.type());
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
+                chatService.finalizeStream(prep.conversationId(), answer, List.of());
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
+                sse(writer, "{\"type\":\"done\"}");
+                return;
+            }
+
             boolean useRegisteredTools = llmClient.supportsToolCalling() && chatService.shouldUseRegisteredTools(prep);
             if (useRegisteredTools) {
                 try {
@@ -138,52 +150,28 @@ public class ChatController {
                         var toolCall = toolAwareResponse.toolCalls().get(0);
                         Object toolResult = chatService.executeToolCall(toolCall, userEmail, prep.conversationId());
 
-                        // Whiteboard actions: emit SSE action, then give LLM a second round to inject content
+                        // Whiteboard actions: emit SSE action and avoid extra LLM calls for opening.
                         if (toolResult instanceof WhiteboardAction action) {
                             log.info("[TOOLS] emitting whiteboard action conversation_id={} tool={} action={}",
                                     prep.conversationId(), toolCall.name(), action.type());
                             sse(writer, objectMapper.writeValueAsString(
                                     java.util.Map.of("type", "action", "action", action)));
 
-                            String actionContext = "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
-                                    + objectMapper.writeValueAsString(action);
-
-                            // If whiteboard was just opened, give LLM another chance to inject content
-                            String roundTwoPrompt = prep.prompt() + actionContext;
                             if ("OPEN_WHITEBOARD".equals(action.type())) {
-                                Object wbId = action.payload().get("whiteboardId");
-                                roundTwoPrompt += "\n\nLa pizarra ya está abierta (whiteboardId=" + wbId
-                                        + ", conversationId=" + prep.conversationId() + ")."
-                                        + " Ahora inyectá el contenido completo usando inject_whiteboard_content."
-                                        + " Fragmentá en bloques: TITLE, TEXT, STEP, FORMULA según corresponda."
-                                        + " Después de inyectar, confirmá brevemente al estudiante.";
-                                try {
-                                    var injectResponse = chatService.generateWithRegisteredTools(roundTwoPrompt);
-                                    if (injectResponse.hasToolCalls()) {
-                                        var injectCall = injectResponse.toolCalls().get(0);
-                                        Object injectResult = chatService.executeToolCall(injectCall, userEmail, prep.conversationId());
-                                        if (injectResult instanceof WhiteboardAction injectAction) {
-                                            log.info("[TOOLS] emitting inject action conversation_id={} tool={} action={}",
-                                                    prep.conversationId(), injectCall.name(), injectAction.type());
-                                            sse(writer, objectMapper.writeValueAsString(
-                                                    java.util.Map.of("type", "action", "action", injectAction)));
-                                            roundTwoPrompt += "\n\n[ACCIÓN EJECUTADA: " + injectCall.name() + "]\n"
-                                                    + objectMapper.writeValueAsString(injectAction);
-                                        }
-                                    }
-                                } catch (Exception e) {
-                                    log.warn("[TOOLS] Falló segundo round de tools para OPEN_WHITEBOARD: {}", e.getMessage());
-                                }
-                            }
+                                full.append("Abrí la pizarra a la derecha. Podés usarla ahora y pedirme que agregue pasos o fórmulas.");
+                            } else {
+                                String actionContext = "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
+                                        + objectMapper.writeValueAsString(action);
 
-                            try {
-                                full.append(llmClient.generate(roundTwoPrompt
-                                        + "\n\nRespondé al estudiante en una oración breve confirmando lo que hiciste. No repitas JSON.\n"));
-                            } catch (Exception e) {
-                                log.warn("Falló respuesta de confirmación para {}. Usando fallback.", toolCall.name());
-                                full.append("OPEN_WHITEBOARD".equals(action.type())
-                                        ? "Abrí la pizarra con el contenido. Podés verla a la derecha."
-                                        : "Actualicé la pizarra con el contenido.");
+                                String roundTwoPrompt = prep.prompt() + actionContext;
+
+                                try {
+                                    full.append(llmClient.generate(roundTwoPrompt
+                                            + "\n\nRespondé al estudiante en una oración breve confirmando lo que hiciste. No repitas JSON.\n"));
+                                } catch (Exception e) {
+                                    log.warn("Falló respuesta de confirmación para {}. Usando fallback.", toolCall.name());
+                                    full.append("Actualicé la pizarra con el contenido.");
+                                }
                             }
                         } else if (shouldContinueWithTextResponse(toolCall.name())) {
                             String toolPayload = objectMapper.writeValueAsString(toolResult);
@@ -216,13 +204,23 @@ public class ChatController {
                 } catch (Exception e) {
                     log.warn("[TOOLS] Falló tool calling conversation_id={} ({}). Reintentando sin tools.",
                             prep.conversationId(), e.getMessage());
-                    // If user asked for whiteboard content, tell them to retry — don't dump full text in chat
+                    // If the user asked for a whiteboard, open it locally instead of failing on model/tool noise.
                     String msg = prep.userMessage() != null ? prep.userMessage().toLowerCase(java.util.Locale.ROOT) : "";
                     boolean wantedWhiteboard = msg.contains("pizarra") || msg.contains("whiteboard")
                             || msg.contains("explicame en") || msg.contains("mostralo en");
                     if (wantedWhiteboard) {
-                        full.append("El servicio de pizarra está ocupado ahora mismo. "
-                                + "Intentá de nuevo en unos segundos con el mismo mensaje.");
+                        try {
+                            WhiteboardAction fallbackAction = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
+                            log.info("[TOOLS] emitting fallback whiteboard action conversation_id={} action={}",
+                                    prep.conversationId(), fallbackAction.type());
+                            sse(writer, objectMapper.writeValueAsString(
+                                    java.util.Map.of("type", "action", "action", fallbackAction)));
+                            full.append("Abrí la pizarra a la derecha. Podés usarla ahora y pedirme que agregue pasos o fórmulas.");
+                        } catch (Exception fallbackError) {
+                            log.warn("[TOOLS] Falló fallback local de pizarra conversation_id={}: {}",
+                                    prep.conversationId(), fallbackError.getMessage());
+                            full.append("No pude abrir la pizarra en este momento. Intentá de nuevo en unos segundos.");
+                        }
                     } else {
                         llmClient.generateStream(prep.prompt(), chunk -> {
                             if (markerFound[0]) { full.append(chunk); return; }

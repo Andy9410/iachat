@@ -1,20 +1,28 @@
 package com.academy.chatservice.service;
 
+import com.academy.chatservice.model.Conversation;
+import com.academy.chatservice.model.Whiteboard;
+import com.academy.chatservice.repository.ConversationRepository;
+import com.academy.chatservice.repository.WhiteboardEntryRepository;
+import com.academy.chatservice.repository.WhiteboardRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@ExtendWith(MockitoExtension.class)
 class WhiteboardServiceTest {
 
     private WhiteboardService service;
@@ -77,6 +85,21 @@ class WhiteboardServiceTest {
         return invoke("normalize", new Class<?>[]{String.class}, value);
     }
 
+    private static void setPrivateId(Object target, Long id) {
+        try {
+            Field field = target.getClass().getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(target, id);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException("Error setting id", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T proxy(Class<T> type, InvocationHandler handler) {
+        return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler);
+    }
+
     @SuppressWarnings("unchecked")
     private String summarizeElements(List<Map<String, Object>> elements) {
         return invoke("summarizeElements", new Class<?>[]{List.class}, elements);
@@ -100,6 +123,105 @@ class WhiteboardServiceTest {
     private double confidence(double ocrConfidence, boolean hasUsefulOcr, List<Map<String, Object>> elements) {
         return invoke("confidence", new Class<?>[]{double.class, boolean.class, List.class},
                 ocrConfidence, hasUsefulOcr, elements);
+    }
+
+    @Nested
+    class ActiveWhiteboardTest {
+
+        @Test
+        void active_crea_pizarra_si_no_existe() {
+            var conversation = new Conversation();
+            setPrivateId(conversation, 295L);
+            conversation.setUserEmail("learnsoftuy@edu.uy");
+
+            var savedWhiteboards = new ArrayList<Whiteboard>();
+            ConversationRepository conversationRepository = proxy(ConversationRepository.class, (target, method, args) -> {
+                if ("findByIdAndUserEmail".equals(method.getName())) return Optional.of(conversation);
+                throw new UnsupportedOperationException(method.getName());
+            });
+            WhiteboardRepository whiteboardRepository = proxy(WhiteboardRepository.class, (target, method, args) -> {
+                if ("findFirstByConversationIdOrderByUpdatedAtDesc".equals(method.getName())) return Optional.empty();
+                if ("save".equals(method.getName())) {
+                    Whiteboard whiteboard = (Whiteboard) args[0];
+                    setPrivateId(whiteboard, 7L);
+                    savedWhiteboards.add(whiteboard);
+                    return whiteboard;
+                }
+                throw new UnsupportedOperationException(method.getName());
+            });
+
+            var service = new WhiteboardService(
+                    conversationRepository,
+                    whiteboardRepository,
+                    null,
+                    null,
+                    null,
+                    new ObjectMapper()
+            );
+
+            var active = service.active(295L, "learnsoftuy@edu.uy");
+
+            assertThat(active.id()).isEqualTo("wb_7");
+            assertThat(active.conversationId()).isEqualTo(295L);
+            assertThat(active.title()).isEqualTo("Pizarra inteligente");
+            assertThat(active.data()).containsEntry("version", 1);
+            assertThat(active.data()).containsKey("elements");
+            assertThat(savedWhiteboards).hasSize(1);
+        }
+    }
+
+    @Nested
+    class TeachFragmentTest {
+
+        @Test
+        void buildTeachingPrompt_no_usa_tipo_pipe_como_ejemplo() {
+            WhiteboardEntryRepository entryRepository = proxy(WhiteboardEntryRepository.class, (target, method, args) -> {
+                if ("findByConversationIdOrderByOrderIndexAsc".equals(method.getName())) return List.of();
+                throw new UnsupportedOperationException(method.getName());
+            });
+            var service = new WhiteboardService(null, null, entryRepository, null, null, new ObjectMapper());
+
+            String prompt = service.buildTeachingPrompt(295L, null, 0, "2x + 6 = 9");
+
+            assertThat(prompt).doesNotContain("TITLE|STEP");
+            assertThat(prompt).contains("\"type\":\"TITLE\"");
+            assertThat(prompt).contains("\"type\":\"FORMULA\"");
+            assertThat(prompt).contains("No combines tipos con '|'");
+        }
+
+        @Test
+        void parseTeachFragment_normaliza_tipo_con_pipes_y_extrae_formula() {
+            String raw = """
+                    {"blocks":[{"type":"TITLE|STEP|FORMULA|EXAMPLE|WARNING|$2x + 6 = 9","content":"La ecuación dice que dos veces el número más seis iguala a nueve."}],"question":"¿Qué hacemos con el 6?","isComplete":false}
+                    """;
+
+            var fragment = service.parseTeachFragment(raw);
+
+            assertThat(fragment.question()).isEqualTo("¿Qué hacemos con el 6?");
+            assertThat(fragment.isComplete()).isFalse();
+            assertThat(fragment.blocks()).contains(
+                    Map.of("type", "TEXT", "content", "La ecuación dice que dos veces el número más seis iguala a nueve."),
+                    Map.of("type", "FORMULA", "content", "2x + 6 = 9")
+            );
+            assertThat(fragment.blocks())
+                    .allSatisfy(block -> assertThat(block.get("type")).doesNotContain("|"));
+        }
+
+        @Test
+        void parseTeachFragment_no_guarda_json_crudo_si_la_respuesta_viene_mal_formada() {
+            String raw = """
+                    {"blocks":[{"type":"TITLE|STEP|FORMULA|EXAMPLE|WARNING|$2x + 6 = 9","content":"Vamos a identificar el valor de cada variable paso a paso.","content":"La ecuación dice que dos veces el número más seis iguala a nueve."}],{"content":"Por ahora, restamos 6 de ambos lados."}],"question":"¿Qué haces para acercarte al resultado?","isComplete":false}
+                    """;
+
+            var fragment = service.parseTeachFragment(raw);
+
+            assertThat(fragment.question()).isEqualTo("¿Qué haces para acercarte al resultado?");
+            assertThat(fragment.blocks()).isNotEmpty();
+            assertThat(fragment.blocks()).anySatisfy(block ->
+                    assertThat(block).containsEntry("type", "FORMULA").containsEntry("content", "2x + 6 = 9"));
+            assertThat(fragment.blocks())
+                    .allSatisfy(block -> assertThat(block.get("content")).doesNotContain("\"blocks\""));
+        }
     }
 
     // ── toPublicId / parsePublicId ────────────────────────────────────────────

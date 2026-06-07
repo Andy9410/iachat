@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -162,6 +163,15 @@ public class ChatService {
                 || msg.contains("abrí la") || msg.contains("abri la");
     }
 
+    public boolean shouldOpenWhiteboardLocally(StreamPrep prep) {
+        if (prep == null || prep.userMessage() == null) return false;
+        String msg = prep.userMessage().toLowerCase(java.util.Locale.ROOT);
+        return msg.contains("pizarra") || msg.contains("whiteboard")
+                || msg.contains("explicame en") || msg.contains("explicá en")
+                || msg.contains("mostralo en") || msg.contains("abrí la")
+                || msg.contains("abri la");
+    }
+
     public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {
         return whiteboardInterpretation == null
                 && activeWhiteboardId != null
@@ -174,6 +184,23 @@ public class ChatService {
                 conversationId,
                 () -> toolRegistry.execute(toolCall.name(), toolCall.arguments())
         );
+    }
+
+    @Transactional
+    public WhiteboardAction openWhiteboardFallback(Long conversationId, String userEmail) {
+        WhiteboardDto dto = whiteboardService.openForTeaching(
+                conversationId,
+                "Pizarra de enseñanza",
+                "teaching",
+                userEmail
+        );
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("conversationId", dto.conversationId());
+        payload.put("whiteboardId", dto.id());
+        payload.put("title", dto.title());
+        payload.put("mode", dto.mode());
+        return new WhiteboardAction("OPEN_WHITEBOARD", payload);
     }
 
     public boolean shouldForceExerciseBreakdown(StreamPrep prep) {

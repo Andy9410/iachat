@@ -14,12 +14,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class WhiteboardService {
 
     private static final Map<String, Object> EMPTY_DATA = Map.of("version", 1, "elements", List.of());
+    private static final Set<String> TEACH_BLOCK_TYPES = Set.of(
+            "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING", "QUESTION"
+    );
+    private static final Pattern JSON_STRING_FIELD = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final ConversationRepository conversationRepository;
     private final WhiteboardRepository whiteboardRepository;
@@ -53,12 +59,18 @@ public class WhiteboardService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public WhiteboardDto active(Long conversationId, String userEmail) {
-        requireConversation(conversationId, userEmail);
+        Conversation conversation = requireConversation(conversationId, userEmail);
         return whiteboardRepository.findFirstByConversationIdOrderByUpdatedAtDesc(conversationId)
                 .map(this::toDto)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pizarra no encontrada"));
+                .orElseGet(() -> {
+                    Whiteboard whiteboard = new Whiteboard();
+                    whiteboard.setConversation(conversation);
+                    whiteboard.setTitle("Pizarra inteligente");
+                    whiteboard.setData(writeData(EMPTY_DATA));
+                    return toDto(whiteboardRepository.save(whiteboard));
+                });
     }
 
     @Transactional
@@ -424,7 +436,12 @@ public class WhiteboardService {
         }
 
         sb.append("Respondé ÚNICAMENTE con un JSON válido (sin texto extra, sin markdown, sin backticks):\n");
-        sb.append("{\"blocks\":[{\"type\":\"TITLE|STEP|FORMULA|EXAMPLE|WARNING|TEXT\",\"content\":\"...\"}]");
+        sb.append("Tipos permitidos para cada bloque: TITLE, TEXT, STEP, FORMULA, EXAMPLE, WARNING, QUESTION.\n");
+        sb.append("No combines tipos con '|'. No uses claves duplicadas. Las fórmulas van en content, sin prefijo '$'.\n");
+        sb.append("Ejemplo válido:\n");
+        sb.append("{\"blocks\":[{\"type\":\"TITLE\",\"content\":\"Resolver una ecuación lineal\"},");
+        sb.append("{\"type\":\"FORMULA\",\"content\":\"2x + 6 = 9\"},");
+        sb.append("{\"type\":\"STEP\",\"content\":\"Restamos 6 en ambos lados para aislar el término con x.\"}]");
         sb.append(",\"question\":\"Pregunta socrática breve (o null si la explicación ya está completa)\",\"isComplete\":false}\n");
 
         return sb.toString();
@@ -449,7 +466,7 @@ public class WhiteboardService {
                 for (var b : blocksNode) {
                     String type    = b.has("type")    ? b.get("type").asText("TEXT")    : "TEXT";
                     String content = b.has("content") ? b.get("content").asText("")     : "";
-                    if (!content.isBlank()) blocks.add(Map.of("type", type, "content", content));
+                    blocks.addAll(sanitizeTeachBlock(type, content));
                 }
             }
 
@@ -460,13 +477,129 @@ public class WhiteboardService {
             }
             boolean isComplete = node.has("isComplete") && node.get("isComplete").asBoolean(false);
 
-            if (blocks.isEmpty()) blocks.add(Map.of("type", "TEXT", "content", raw.trim()));
+            if (blocks.isEmpty()) blocks.addAll(salvageTeachBlocks(raw));
             return new TeachFragment(blocks, question, isComplete || question == null);
         } catch (Exception e) {
+            String question = extractJsonStringField(raw, "question");
+            List<Map<String, String>> blocks = salvageTeachBlocks(raw);
             return new TeachFragment(
-                List.of(Map.of("type", "TEXT", "content", raw == null ? "" : raw.trim())),
-                null, true
+                blocks,
+                question,
+                question == null
             );
+        }
+    }
+
+    private List<Map<String, String>> sanitizeTeachBlock(String rawType, String rawContent) {
+        List<Map<String, String>> blocks = new ArrayList<>();
+        String content = cleanTeachContent(rawContent);
+
+        if (!content.isBlank()) {
+            addTeachBlock(blocks, normalizeTeachBlockType(rawType, content), content);
+        }
+
+        if (rawType != null && rawType.contains("|")) {
+            for (String token : rawType.split("\\|")) {
+                String extracted = cleanTeachContent(token);
+                if (extracted.isBlank() || TEACH_BLOCK_TYPES.contains(extracted.toUpperCase(Locale.ROOT))) {
+                    continue;
+                }
+                addTeachBlock(blocks, inferTeachBlockType(extracted), extracted);
+            }
+        }
+
+        return blocks;
+    }
+
+    private List<Map<String, String>> salvageTeachBlocks(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of(Map.of("type", "TEXT", "content", "No se pudo generar el siguiente paso."));
+        }
+
+        List<Map<String, String>> blocks = new ArrayList<>();
+        List<String> types = extractJsonStringFields(raw, "type");
+        List<String> contents = extractJsonStringFields(raw, "content");
+
+        int max = Math.max(types.size(), contents.size());
+        for (int i = 0; i < max; i++) {
+            String type = i < types.size() ? types.get(i) : "TEXT";
+            String content = i < contents.size() ? contents.get(i) : "";
+            blocks.addAll(sanitizeTeachBlock(type, content));
+        }
+
+        if (blocks.isEmpty()) {
+            String cleaned = cleanTeachContent(raw);
+            if (!cleaned.isBlank() && !looksLikeRawJson(cleaned)) {
+                addTeachBlock(blocks, "TEXT", cleaned);
+            }
+        }
+
+        if (blocks.isEmpty()) {
+            addTeachBlock(blocks, "TEXT", "No se pudo estructurar el siguiente paso.");
+        }
+        return blocks;
+    }
+
+    private String normalizeTeachBlockType(String rawType, String content) {
+        if (rawType == null || rawType.isBlank() || rawType.contains("|")) {
+            return inferTeachBlockType(content);
+        }
+        String candidate = rawType.trim().toUpperCase(Locale.ROOT);
+        return TEACH_BLOCK_TYPES.contains(candidate) ? candidate : inferTeachBlockType(content);
+    }
+
+    private String inferTeachBlockType(String content) {
+        return isSimpleMathExpression(content) ? "FORMULA" : "TEXT";
+    }
+
+    private void addTeachBlock(List<Map<String, String>> blocks, String type, String content) {
+        String cleaned = cleanTeachContent(content);
+        if (cleaned.isBlank()) return;
+
+        String normalizedType = TEACH_BLOCK_TYPES.contains(type) ? type : "TEXT";
+        boolean duplicate = blocks.stream().anyMatch(existing ->
+                cleaned.equals(existing.get("content")) && normalizedType.equals(existing.get("type")));
+        if (!duplicate) {
+            blocks.add(Map.of("type", normalizedType, "content", cleaned));
+        }
+    }
+
+    private String cleanTeachContent(String value) {
+        if (value == null) return "";
+        String cleaned = value.trim();
+        while (cleaned.startsWith("$")) {
+            cleaned = cleaned.substring(1).trim();
+        }
+        return cleaned;
+    }
+
+    private boolean looksLikeRawJson(String value) {
+        String trimmed = value.trim();
+        return trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.contains("\"blocks\"");
+    }
+
+    private String extractJsonStringField(String raw, String field) {
+        List<String> values = extractJsonStringFields(raw, field);
+        return values.isEmpty() ? null : values.get(0);
+    }
+
+    private List<String> extractJsonStringFields(String raw, String field) {
+        if (raw == null || raw.isBlank()) return List.of();
+        Pattern pattern = Pattern.compile(String.format(JSON_STRING_FIELD.pattern(), Pattern.quote(field)));
+        Matcher matcher = pattern.matcher(raw);
+        List<String> values = new ArrayList<>();
+        while (matcher.find()) {
+            String value = unescapeJsonString(matcher.group(1));
+            if (!value.isBlank()) values.add(value.trim());
+        }
+        return values;
+    }
+
+    private String unescapeJsonString(String value) {
+        try {
+            return objectMapper.readValue("\"" + value + "\"", String.class);
+        } catch (Exception e) {
+            return value.replace("\\\"", "\"").replace("\\\\", "\\");
         }
     }
 

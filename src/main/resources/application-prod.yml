@@ -5,6 +5,9 @@ spring:
     password: ${DB_PASSWORD}
   flyway:
     validate-on-migrate: false
+    out-of-order: false
+    baseline-on-migrate: true
+    baseline-version: 0
 
 llm:
   provider: ${LLM_PROVIDER:groq}

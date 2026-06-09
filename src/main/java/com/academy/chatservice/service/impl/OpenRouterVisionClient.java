@@ -22,7 +22,7 @@ public class OpenRouterVisionClient implements VisionModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenRouterVisionClient.class);
     private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
-    private static final String DEFAULT_FREE_VISION_MODEL = "openai/gpt-4o-mini";
+    private static final String DEFAULT_FREE_VISION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;

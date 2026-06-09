@@ -67,9 +67,9 @@ document-service:
 llm:
   provider: ${LLM_PROVIDER:groq}
   openrouter:
-    model: ${OPENROUTER_MODEL:openai/gpt-4o-mini}
-    tools-model: ${OPENROUTER_TOOLS_MODEL:openai/gpt-4o-mini}
-    vision-model: ${OPENROUTER_VISION_MODEL:openai/gpt-4o-mini}
+    model: ${OPENROUTER_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
+    tools-model: ${OPENROUTER_TOOLS_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
+    vision-model: ${OPENROUTER_VISION_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
     reasoning-enabled: ${OPENROUTER_REASONING_ENABLED:false}
     connect-timeout-seconds: 10
     request-timeout-seconds: 120

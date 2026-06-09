@@ -32,8 +32,8 @@ public class OpenRouterLLMClient implements LLMClient {
     private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
     // Modelos por defecto estables (pagos) para evitar el rate-limit (429) del tier free.
     // Se pueden sobreescribir con OPENROUTER_MODEL / OPENROUTER_VISION_MODEL / OPENROUTER_TOOLS_MODEL.
-    private static final String DEFAULT_FREE_MODEL = "openai/gpt-4o-mini";
-    private static final String DEFAULT_FREE_VISION_MODEL = "openai/gpt-4o-mini";
+    private static final String DEFAULT_FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+    private static final String DEFAULT_FREE_VISION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -54,7 +54,7 @@ public class OpenRouterLLMClient implements LLMClient {
 
     public String toolsModelName() {
         String m = props.toolsModel();
-        return (m != null && !m.isBlank()) ? m.trim() : "openai/gpt-4o-mini";
+        return (m != null && !m.isBlank()) ? m.trim() : "nvidia/nemotron-3-ultra-550b-a55b:free";
     }
 
     @Override

@@ -125,15 +125,21 @@ public class ChatController {
             // poco confiable en modelos chicos). El frontend abre el panel e inicia la resolución
             // paso a paso vía /teach. El modelo igual puede abrirlo por su cuenta en otros casos.
             if (chatService.shouldOpenWorkspaceLocally(prep)) {
-                WhiteboardAction action = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
-                String answer = "Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.";
-                log.info("[TOOLS] emitting deterministic workspace open conversation_id={} action={}",
-                        prep.conversationId(), action.type());
-                sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
-                chatService.finalizeStream(prep.conversationId(), answer, List.of());
-                sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
-                sse(writer, "{\"type\":\"done\"}");
-                return;
+                try {
+                    WhiteboardAction action = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
+                    String answer = "Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.";
+                    log.info("[TOOLS] emitting deterministic workspace open conversation_id={} action={}",
+                            prep.conversationId(), action.type());
+                    sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
+                    chatService.finalizeStream(prep.conversationId(), answer, List.of());
+                    sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
+                    sse(writer, "{\"type\":\"done\"}");
+                    return;
+                } catch (Exception e) {
+                    // No matar el turno si falla abrir el workspace: seguimos con la respuesta normal.
+                    log.warn("[WS] No se pudo abrir el workspace de forma determinística conversation_id={}: {}",
+                            prep.conversationId(), e.getMessage(), e);
+                }
             }
 
             boolean useRegisteredTools = llmClient.supportsToolCalling() && chatService.shouldUseRegisteredTools(prep);

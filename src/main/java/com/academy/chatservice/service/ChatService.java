@@ -176,6 +176,30 @@ public class ChatService {
         return !isTrivialMessage(prep.userMessage());
     }
 
+    /**
+     * Apertura determinística del workspace de Resolución guiada cuando el mensaje pide
+     * claramente resolver / usar la pizarra. Es una red de seguridad: el LLM también puede
+     * abrirlo por su cuenta vía la tool open_whiteboard, pero los modelos chicos no hacen
+     * tool-calling confiable, así que para pedidos explícitos lo abrimos nosotros y dejamos
+     * que el flujo /teach (generación plana) resuelva paso a paso.
+     */
+    public boolean shouldOpenWorkspaceLocally(StreamPrep prep) {
+        if (prep == null || prep.userMessage() == null) return false;
+        // Si ya hay pizarra activa, el modelo continúa por contexto; no forzamos otra apertura.
+        if (prep.activeWhiteboardId() != null && !prep.activeWhiteboardId().isBlank()) return false;
+
+        String m = prep.userMessage().toLowerCase(java.util.Locale.ROOT);
+        boolean explicit = m.contains("pizarra") || m.contains("resolución guiada") || m.contains("resolucion guiada");
+        boolean wantsResolution = m.contains("resolv") || m.contains("resuelv")
+                || m.contains("paso a paso") || m.contains("desarroll")
+                || m.contains("mostrame") || m.contains("mostrame cómo") || m.contains("mostrame como")
+                || m.contains("explicame") || m.contains("explicáme") || m.contains("explícame")
+                || m.contains("no entiendo") || m.contains("graficar") || m.contains("graficá");
+        // Ecuación / expresión a resolver: contiene un '=' junto a algún dígito.
+        boolean hasEquation = m.matches(".*\\d[^=]*=.*") || m.matches(".*=[^=]*\\d.*");
+        return explicit || wantsResolution || hasEquation;
+    }
+
     public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {
         return whiteboardInterpretation == null
                 && activeWhiteboardId != null

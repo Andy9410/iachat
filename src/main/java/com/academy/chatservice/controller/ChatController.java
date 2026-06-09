@@ -120,8 +120,21 @@ public class ChatController {
             var sentContent = new StringBuilder();
             boolean[] markerFound = {false};
 
-            // La apertura del workspace ("Resolución guiada") la decide el modelo vía la tool
-            // open_whiteboard según la intención educativa; ya no se abre por keywords del usuario.
+            // Red de seguridad determinística: si el mensaje pide claramente resolver / usar la
+            // pizarra, abrimos el workspace nosotros (no dependemos del tool-calling del modelo,
+            // poco confiable en modelos chicos). El frontend abre el panel e inicia la resolución
+            // paso a paso vía /teach. El modelo igual puede abrirlo por su cuenta en otros casos.
+            if (chatService.shouldOpenWorkspaceLocally(prep)) {
+                WhiteboardAction action = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
+                String answer = "Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.";
+                log.info("[TOOLS] emitting deterministic workspace open conversation_id={} action={}",
+                        prep.conversationId(), action.type());
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
+                chatService.finalizeStream(prep.conversationId(), answer, List.of());
+                sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
+                sse(writer, "{\"type\":\"done\"}");
+                return;
+            }
 
             boolean useRegisteredTools = llmClient.supportsToolCalling() && chatService.shouldUseRegisteredTools(prep);
             if (useRegisteredTools) {

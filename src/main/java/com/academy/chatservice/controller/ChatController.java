@@ -121,23 +121,23 @@ public class ChatController {
             boolean[] markerFound = {false};
 
             // Red de seguridad determinística: si el mensaje pide claramente resolver / usar la
-            // pizarra, abrimos el workspace nosotros (no dependemos del tool-calling del modelo,
-            // poco confiable en modelos chicos). El frontend abre el panel e inicia la resolución
-            // paso a paso vía /teach. El modelo igual puede abrirlo por su cuenta en otros casos.
+            // pizarra, generamos y persistimos el workspace nosotros antes de responder. No
+            // dependemos del tool-calling del modelo, poco confiable en modelos chicos.
             if (chatService.shouldOpenWorkspaceLocally(prep)) {
                 try {
-                    WhiteboardAction action = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
-                    String answer = "Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.";
-                    log.info("[TOOLS] emitting deterministic workspace open conversation_id={} action={}",
-                            prep.conversationId(), action.type());
+                    // Sincrónico: genera + persiste la resolución de la tarea actual ANTES de responder.
+                    WhiteboardAction action = chatService.openAndResolveWorkspace(
+                            prep.conversationId(), prep.userMessage(), userEmail);
+                    String answer = "Lo armé en la resolución guiada de la derecha. Mirá el paso a paso ahí.";
                     sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
                     chatService.finalizeStream(prep.conversationId(), answer, List.of());
                     sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
                     sse(writer, "{\"type\":\"done\"}");
                     return;
                 } catch (Exception e) {
-                    // No matar el turno si falla abrir el workspace: seguimos con la respuesta normal.
-                    log.warn("[WS] No se pudo abrir el workspace de forma determinística conversation_id={}: {}",
+                    // Si falla generar/persistir, NO afirmamos que lo armamos: seguimos con la
+                    // respuesta normal del chat (consistencia entre chat y workspace).
+                    log.warn("[WS] No se pudo resolver en el workspace conversation_id={}: {}",
                             prep.conversationId(), e.getMessage(), e);
                 }
             }
@@ -152,13 +152,20 @@ public class ChatController {
 
                         // Whiteboard actions: emit SSE action and avoid extra LLM calls for opening.
                         if (toolResult instanceof WhiteboardAction action) {
+                            if ("OPEN_WHITEBOARD".equals(action.type()) && !chatService.hasWorkspaceContent(action)) {
+                                log.info("[WS] Tool open_whiteboard no trajo contenido; generando resolución sincronizada conversation_id={}",
+                                        prep.conversationId());
+                                action = chatService.openAndResolveWorkspace(
+                                        prep.conversationId(), prep.userMessage(), userEmail);
+                            }
+
                             log.info("[TOOLS] emitting whiteboard action conversation_id={} tool={} action={}",
                                     prep.conversationId(), toolCall.name(), action.type());
                             sse(writer, objectMapper.writeValueAsString(
                                     java.util.Map.of("type", "action", "action", action)));
 
-                            if ("OPEN_WHITEBOARD".equals(action.type())) {
-                                full.append("Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.");
+                            if (chatService.hasWorkspaceContent(action)) {
+                                full.append("Lo armé en la resolución guiada de la derecha. Mirá el paso a paso ahí.");
                             } else {
                                 String actionContext = "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
                                         + objectMapper.writeValueAsString(action);
@@ -210,17 +217,18 @@ public class ChatController {
                             || msg.contains("explicame en") || msg.contains("mostralo en");
                     if (wantedWhiteboard) {
                         try {
-                            WhiteboardAction fallbackAction = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
-                            log.info("[TOOLS] emitting fallback whiteboard action conversation_id={} action={}",
+                            WhiteboardAction fallbackAction = chatService.openAndResolveWorkspace(
+                                    prep.conversationId(), prep.userMessage(), userEmail);
+                            log.info("[TOOLS] emitting fallback resolved workspace action conversation_id={} action={}",
                                     prep.conversationId(), fallbackAction.type());
                             sse(writer, objectMapper.writeValueAsString(
                                     java.util.Map.of("type", "action", "action", fallbackAction)));
-                            full.append("Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.");
+                            full.append("Lo armé en la resolución guiada de la derecha. Mirá el paso a paso ahí.");
                         } catch (Exception fallbackError) {
 
-                            log.warn("[TOOLS] Falló fallback local de pizarra conversation_id={}: {}",
+                            log.warn("[TOOLS] Falló fallback local de resolución guiada conversation_id={}: {}",
                                     prep.conversationId(), fallbackError.getMessage());
-                            full.append("No pude abrir la pizarra en este momento. Intentá de nuevo en unos segundos.");
+                            full.append("No pude actualizar la resolución guiada en este momento. Intentá de nuevo en unos segundos.");
                         }
                     } else {
                         llmClient.generateStream(prep.prompt(), chunk -> {

@@ -277,6 +277,14 @@ public class WhiteboardService {
         return toDto(whiteboardRepository.save(wb));
     }
 
+    /** Actualiza la intención educativa actual del workspace (al cambiar de tarea). */
+    @Transactional
+    public void updateIntent(String whiteboardId, String intent, String userEmail) {
+        Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);
+        whiteboard.setIntent(intent != null && !intent.isBlank() ? intent.trim() : whiteboard.getIntent());
+        whiteboardRepository.save(whiteboard);
+    }
+
     @Transactional
     public List<WhiteboardEntryDto> addEntries(String whiteboardId, Long conversationId, List<UpdateWhiteboardArgs.StepArg> entries, String userEmail) {
         Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);

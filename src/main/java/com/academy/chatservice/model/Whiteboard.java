@@ -24,6 +24,10 @@ public class Whiteboard {
     @Column(nullable = false)
     private String title;
 
+    /** Intención educativa actual del workspace (p. ej. "resolver ejercicio 2", "explicar algoritmo"). */
+    @Column(name = "intent")
+    private String intent;
+
     @Column(nullable = false, columnDefinition = "TEXT")
     private String data;
 
@@ -60,6 +64,8 @@ public class Whiteboard {
     public void setExerciseLabel(String exerciseLabel) { this.exerciseLabel = exerciseLabel; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
+    public String getIntent() { return intent; }
+    public void setIntent(String intent) { this.intent = intent; }
     public String getData() { return data; }
     public void setData(String data) { this.data = data; }
     public String getMode() { return mode; }

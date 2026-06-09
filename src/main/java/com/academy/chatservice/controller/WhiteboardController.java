@@ -92,7 +92,7 @@ public class WhiteboardController {
             @AuthenticationPrincipal Jwt jwt
     ) {
         var argEntries = request.entries().stream()
-                .map(e -> new com.academy.chatservice.model.tools.UpdateWhiteboardArgs.StepArg(e.type(), e.content(), e.orderIndex()))
+                .map(e -> new com.academy.chatservice.model.tools.UpdateWhiteboardArgs.StepArg(e.type(), e.author(), e.content(), e.orderIndex()))
                 .toList();
         return ResponseEntity.ok(whiteboardService.addEntries(whiteboardId, conversationId, argEntries, jwt.getSubject()));
     }

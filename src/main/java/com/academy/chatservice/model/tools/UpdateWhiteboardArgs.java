@@ -7,5 +7,5 @@ public record UpdateWhiteboardArgs(
         Long conversationId,
         List<StepArg> entries
 ) {
-    public record StepArg(String type, String content, int orderIndex) {}
+    public record StepArg(String type, String author, String content, int orderIndex) {}
 }

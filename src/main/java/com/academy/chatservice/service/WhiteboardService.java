@@ -23,7 +23,7 @@ public class WhiteboardService {
 
     private static final Map<String, Object> EMPTY_DATA = Map.of("version", 1, "elements", List.of());
     private static final Set<String> TEACH_BLOCK_TYPES = Set.of(
-            "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING", "QUESTION"
+            "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING", "QUESTION", "NOTE"
     );
     private static final Pattern JSON_STRING_FIELD = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
 
@@ -67,7 +67,7 @@ public class WhiteboardService {
                 .orElseGet(() -> {
                     Whiteboard whiteboard = new Whiteboard();
                     whiteboard.setConversation(conversation);
-                    whiteboard.setTitle("Pizarra inteligente");
+                    whiteboard.setTitle("Resolución guiada");
                     whiteboard.setData(writeData(EMPTY_DATA));
                     return toDto(whiteboardRepository.save(whiteboard));
                 });
@@ -89,7 +89,7 @@ public class WhiteboardService {
         whiteboard.setExerciseLabel(exerciseLabel);
         whiteboard.setTitle(normalize(request.title()) != null
                 ? request.title().trim()
-                : exerciseLabel != null ? "Pizarra - " + exerciseLabel : "Pizarra inteligente");
+                : exerciseLabel != null ? "Resolución guiada - " + exerciseLabel : "Resolución guiada");
         whiteboard.setData(writeData(request.data() != null ? request.data() : EMPTY_DATA));
         return toDto(whiteboardRepository.save(whiteboard));
     }
@@ -268,7 +268,9 @@ public class WhiteboardService {
 
         Whiteboard wb = new Whiteboard();
         wb.setConversation(conversation);
-        wb.setTitle(title != null && !title.isBlank() ? title.trim() : "Pizarra de enseñanza");
+        String resolvedTitle = title != null && !title.isBlank() ? title.trim() : "Resolución guiada";
+        wb.setTitle(resolvedTitle);
+        wb.setIntent(resolvedTitle);
         wb.setMode(mode != null ? mode : "teaching");
         wb.setStatus("ACTIVE");
         wb.setData(writeData(EMPTY_DATA));
@@ -290,7 +292,8 @@ public class WhiteboardService {
             WhiteboardEntry entry = new WhiteboardEntry();
             entry.setWhiteboard(whiteboard);
             entry.setConversationId(conversationId);
-            entry.setType(e.type() != null ? e.type() : "TEXT");
+            entry.setType(normalizeBlockType(e.type()));
+            entry.setAuthor(e.author() != null && !e.author().isBlank() ? e.author() : "assistant");
             entry.setContent(e.content() != null ? e.content() : "");
             entry.setOrderIndex(e.orderIndex());
             saved.add(entryRepository.save(entry));
@@ -302,6 +305,11 @@ public class WhiteboardService {
     public List<WhiteboardEntryDto> getEntries(String whiteboardId, Long conversationId, String userEmail) {
         Whiteboard whiteboard = requireWhiteboard(whiteboardId, userEmail);
         requireConversation(conversationId, userEmail);
+        // La pizarra debe pertenecer a esta conversación: las conversaciones no comparten pizarra.
+        if (!whiteboard.getConversation().getId().equals(conversationId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "La pizarra no pertenece a esta conversación");
+        }
         return entryRepository.findByWhiteboard_IdOrderByOrderIndexAsc(whiteboard.getId())
                 .stream().map(this::toEntryDto).toList();
     }
@@ -339,10 +347,27 @@ public class WhiteboardService {
     }
 
     public String buildEntriesContext(Long conversationId) {
+        var whiteboard = whiteboardRepository.findFirstByConversationIdOrderByUpdatedAtDesc(conversationId).orElse(null);
         var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
-        if (entries.isEmpty()) return "";
+        if (whiteboard == null && entries.isEmpty()) return "";
 
-        var sb = new StringBuilder("\nPizarra activa de esta conversación:\n\n");
+        var sb = new StringBuilder("\n[RESOLUCIÓN GUIADA — workspace de esta conversación]\n");
+        if (whiteboard != null) {
+            sb.append("whiteboardId: ").append(whiteboard.getId()).append("\n");
+            if (whiteboard.getIntent() != null && !whiteboard.getIntent().isBlank()) {
+                sb.append("intención actual: ").append(whiteboard.getIntent()).append("\n");
+            } else if (whiteboard.getTitle() != null && !whiteboard.getTitle().isBlank()) {
+                sb.append("intención actual: ").append(whiteboard.getTitle()).append("\n");
+            }
+            sb.append("estado: ").append(whiteboard.getStatus()).append("\n");
+        }
+        sb.append("Reutilizá este workspace (no crees uno nuevo) para agregar/continuar contenido.\n\n");
+
+        if (entries.isEmpty()) {
+            sb.append("(El workspace todavía no tiene bloques.)\n");
+            return sb.toString();
+        }
+
         int blockNum = 1;
         for (var e : entries) {
             String who = "user".equals(e.getAuthor()) ? "Alumno" : "IA";
@@ -350,6 +375,13 @@ public class WhiteboardService {
               .append(" — ").append(who).append("]:\n");
             sb.append(e.getContent()).append("\n\n");
         }
+
+        var last = entries.get(entries.size() - 1);
+        String lastWho = "user".equals(last.getAuthor()) ? "Alumno" : "IA";
+        sb.append("Último bloque activo: #").append(entries.size())
+          .append(" (orderIndex ").append(last.getOrderIndex()).append(", ")
+          .append(last.getType()).append(" — ").append(lastWho)
+          .append("). Continuá desde aquí si corresponde.\n");
         return sb.toString();
     }
 
@@ -405,12 +437,13 @@ public class WhiteboardService {
         var entries = entryRepository.findByConversationIdOrderByOrderIndexAsc(conversationId);
         var sb = new StringBuilder();
 
-        sb.append("Sos un tutor que da clases particulares en una pizarra digital.\n");
-        sb.append("Tu estilo es incremental y socrático: escribís un fragmento pequeño, hacés una pregunta, esperás al alumno y continuás.\n\n");
+        sb.append("Sos un tutor que resuelve en un workspace de Resolución guiada.\n");
+        sb.append("Tu estilo es incremental: vas escribiendo la resolución de a poco, paso por paso.\n\n");
 
-        sb.append("REGLA OBLIGATORIA: Escribí SOLO el siguiente fragmento (máximo 3 bloques).\n");
-        sb.append("Después del fragmento, formulá UNA pregunta socrática corta.\n");
-        sb.append("NO des toda la explicación de una vez. La IA escribe — pausa — alumno responde — IA continúa.\n\n");
+        sb.append("REGLA OBLIGATORIA: Escribí SOLO el siguiente fragmento (máximo 3 bloques) y continuá la resolución.\n");
+        sb.append("NUNCA le hagas preguntas al alumno ni esperes su respuesta: 'question' debe ser SIEMPRE null.\n");
+        sb.append("Resolvés vos solo, avanzando un fragmento por vez, sin pausas ni interrogatorios.\n");
+        sb.append("Marcá isComplete=true únicamente cuando la resolución esté completamente terminada.\n\n");
 
         if (topic != null && !topic.isBlank() && stepIndex == 0) {
             sb.append("Tema a explicar: ").append(topic.trim()).append("\n\n");
@@ -427,22 +460,20 @@ public class WhiteboardService {
         }
 
         if (stepIndex == 0) {
-            sb.append("Es el INICIO de la explicación. Comenzá con el primer concepto fundamental (título + 1-2 bloques máximo).\n\n");
-        } else if (userInput != null && !userInput.isBlank()) {
-            sb.append("El alumno respondió: \"").append(userInput.trim()).append("\"\n");
-            sb.append("Incorporá su aporte, validalo o corregilo brevemente, y luego escribí el siguiente fragmento.\n\n");
+            sb.append("Es el INICIO de la resolución. Comenzá con el primer concepto fundamental (título + 1-2 bloques máximo).\n\n");
         } else {
-            sb.append("El alumno eligió continuar sin responder. Avanzá al siguiente fragmento.\n\n");
+            sb.append("Continuá con el siguiente fragmento de la resolución, retomando desde donde quedó.\n\n");
         }
 
         sb.append("Respondé ÚNICAMENTE con un JSON válido (sin texto extra, sin markdown, sin backticks):\n");
-        sb.append("Tipos permitidos para cada bloque: TITLE, TEXT, STEP, FORMULA, EXAMPLE, WARNING, QUESTION.\n");
+        sb.append("Tipos permitidos para cada bloque: TITLE, TEXT, STEP, FORMULA, EXAMPLE, WARNING.\n");
         sb.append("No combines tipos con '|'. No uses claves duplicadas. Las fórmulas van en content, sin prefijo '$'.\n");
+        sb.append("'question' debe ser SIEMPRE null (no preguntes nada). isComplete=true solo cuando la resolución terminó.\n");
         sb.append("Ejemplo válido:\n");
         sb.append("{\"blocks\":[{\"type\":\"TITLE\",\"content\":\"Resolver una ecuación lineal\"},");
         sb.append("{\"type\":\"FORMULA\",\"content\":\"2x + 6 = 9\"},");
         sb.append("{\"type\":\"STEP\",\"content\":\"Restamos 6 en ambos lados para aislar el término con x.\"}]");
-        sb.append(",\"question\":\"Pregunta socrática breve (o null si la explicación ya está completa)\",\"isComplete\":false}\n");
+        sb.append(",\"question\":null,\"isComplete\":false}\n");
 
         return sb.toString();
     }
@@ -478,7 +509,8 @@ public class WhiteboardService {
             boolean isComplete = node.has("isComplete") && node.get("isComplete").asBoolean(false);
 
             if (blocks.isEmpty()) blocks.addAll(salvageTeachBlocks(raw));
-            return new TeachFragment(blocks, question, isComplete || question == null);
+            // 'question' siempre es null en el modo no interactivo; la finalización depende solo de isComplete.
+            return new TeachFragment(blocks, question, isComplete);
         } catch (Exception e) {
             String question = extractJsonStringField(raw, "question");
             List<Map<String, String>> blocks = salvageTeachBlocks(raw);
@@ -607,7 +639,7 @@ public class WhiteboardService {
         if (type == null) return "TEXT";
         return switch (type.toUpperCase()) {
             case "TITLE", "TEXT", "STEP", "FORMULA", "EXAMPLE", "WARNING",
-                 "QUESTION", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING",
+                 "QUESTION", "NOTE", "DRAWING_INSTRUCTION", "SYSTEM_NOTE", "HIGHLIGHT", "DRAWING",
                  "AI_NOTE", "AI_QUESTION", "AI_CORRECTION" -> type.toUpperCase();
             default -> "TEXT";
         };

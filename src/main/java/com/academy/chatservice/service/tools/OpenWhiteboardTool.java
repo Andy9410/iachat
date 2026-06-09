@@ -25,15 +25,16 @@ public class OpenWhiteboardTool implements ChatTool<OpenWhiteboardArgs> {
     public ToolDefinition definition() {
         return new ToolDefinition(
                 "open_whiteboard",
-                "Abre una pizarra de enseñanza asociada a la conversación. "
-                + "Usá esta tool cuando el estudiante pida una explicación paso a paso, "
-                + "una resolución visual o diga 'explicame en la pizarra'.",
+                "Crea el workspace de Resolución guiada de la conversación (si todavía no existe). "
+                + "Usalo solo cuando aún no hay workspace; si ya existe en el contexto, reutilizalo con "
+                + "inject_whiteboard_content en lugar de abrir otro. El estudiante no necesita pedirlo: "
+                + "decidilo según la intención educativa (no entiende algo, pide ver cómo se resuelve, etc.).",
                 Map.of(
                         "type", "object",
                         "properties", Map.of(
                                 "conversationId", Map.of("type", "integer", "description", "ID de la conversación activa"),
-                                "title", Map.of("type", "string", "description", "Título descriptivo de la pizarra, ej: 'Resolución paso a paso'"),
-                                "mode", Map.of("type", "string", "enum", List.of("teaching", "default"), "description", "Modo de la pizarra")
+                                "title", Map.of("type", "string", "description", "Intención educativa del workspace, ej: 'Resolver el ejercicio 2 paso a paso'"),
+                                "mode", Map.of("type", "string", "enum", List.of("teaching", "default"), "description", "Modo del workspace")
                         ),
                         "required", List.of("conversationId", "title")
                 )
@@ -48,7 +49,7 @@ public class OpenWhiteboardTool implements ChatTool<OpenWhiteboardArgs> {
         var ctx = context.require();
         var dto = whiteboardService.openForTeaching(
                 ctx.conversationId(), // always use the real context conversationId, never trust LLM args
-                args.title() != null ? args.title() : "Pizarra de enseñanza",
+                args.title() != null ? args.title() : "Resolución guiada",
                 args.mode() != null ? args.mode() : "teaching",
                 ctx.userEmail()
         );

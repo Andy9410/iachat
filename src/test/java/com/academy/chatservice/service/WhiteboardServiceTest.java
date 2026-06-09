@@ -163,7 +163,7 @@ class WhiteboardServiceTest {
 
             assertThat(active.id()).isEqualTo("wb_7");
             assertThat(active.conversationId()).isEqualTo(295L);
-            assertThat(active.title()).isEqualTo("Pizarra inteligente");
+            assertThat(active.title()).isEqualTo("Resolución guiada");
             assertThat(active.data()).containsEntry("version", 1);
             assertThat(active.data()).containsKey("elements");
             assertThat(savedWhiteboards).hasSize(1);

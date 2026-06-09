@@ -120,27 +120,8 @@ public class ChatController {
             var sentContent = new StringBuilder();
             boolean[] markerFound = {false};
 
-            if (chatService.shouldForceExerciseBreakdown(prep)) {
-                Object toolResult = chatService.executeExerciseBreakdownFallback(prep);
-                String payload = objectMapper.writeValueAsString(toolResult);
-                log.info("[TOOLS] emitting forced exercise_breakdown conversation_id={}", prep.conversationId());
-                chatService.finalizeStream(prep.conversationId(), payload, List.of());
-                sse(writer, payload);
-                sse(writer, "{\"type\":\"done\"}");
-                return;
-            }
-
-            if (chatService.shouldOpenWhiteboardLocally(prep)) {
-                WhiteboardAction action = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
-                String answer = "Abrí la pizarra a la derecha. Podés usarla ahora y pedirme que agregue pasos o fórmulas.";
-                log.info("[TOOLS] emitting local whiteboard action conversation_id={} action={}",
-                        prep.conversationId(), action.type());
-                sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
-                chatService.finalizeStream(prep.conversationId(), answer, List.of());
-                sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
-                sse(writer, "{\"type\":\"done\"}");
-                return;
-            }
+            // La apertura del workspace ("Resolución guiada") la decide el modelo vía la tool
+            // open_whiteboard según la intención educativa; ya no se abre por keywords del usuario.
 
             boolean useRegisteredTools = llmClient.supportsToolCalling() && chatService.shouldUseRegisteredTools(prep);
             if (useRegisteredTools) {
@@ -158,7 +139,7 @@ public class ChatController {
                                     java.util.Map.of("type", "action", "action", action)));
 
                             if ("OPEN_WHITEBOARD".equals(action.type())) {
-                                full.append("Abrí la pizarra a la derecha. Podés usarla ahora y pedirme que agregue pasos o fórmulas.");
+                                full.append("Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.");
                             } else {
                                 String actionContext = "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
                                         + objectMapper.writeValueAsString(action);
@@ -215,8 +196,9 @@ public class ChatController {
                                     prep.conversationId(), fallbackAction.type());
                             sse(writer, objectMapper.writeValueAsString(
                                     java.util.Map.of("type", "action", "action", fallbackAction)));
-                            full.append("Abrí la pizarra a la derecha. Podés usarla ahora y pedirme que agregue pasos o fórmulas.");
+                            full.append("Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.");
                         } catch (Exception fallbackError) {
+
                             log.warn("[TOOLS] Falló fallback local de pizarra conversation_id={}: {}",
                                     prep.conversationId(), fallbackError.getMessage());
                             full.append("No pude abrir la pizarra en este momento. Intentá de nuevo en unos segundos.");

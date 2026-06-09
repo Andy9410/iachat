@@ -149,27 +149,31 @@ public class ChatService {
         return llmClient.generateWithTools(prompt, toolRegistry.definitions());
     }
 
-    public boolean shouldUseRegisteredTools(StreamPrep prep) {
-        if (prep == null) return false;
-        // Whiteboard active: tools always available
-        if (shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation())) return true;
-        // No active whiteboard: enable tools when the user explicitly requests one
-        // or when the message is a complex problem that benefits from structured reasoning
-        String msg = prep.userMessage() != null ? prep.userMessage().toLowerCase(java.util.Locale.ROOT) : "";
-        return msg.contains("pizarra") || msg.contains("whiteboard")
-                || msg.contains("explicame en") || msg.contains("explicá en")
-                || msg.contains("mostralo en") || msg.contains("razonamiento")
-                || msg.contains("paso a paso en") || msg.contains("dibuja")
-                || msg.contains("abrí la") || msg.contains("abri la");
+    /**
+     * Frase corta de cortesía/sin intención educativa: greetings, acuses de recibo, etc.
+     * Para estos mensajes salteamos el path (bloqueante) de tools y conservamos el streaming.
+     */
+    private static final java.util.Set<String> TRIVIAL_MESSAGES = java.util.Set.of(
+            "hola", "buenas", "buenos dias", "buenos días", "buenas tardes", "buenas noches",
+            "gracias", "muchas gracias", "ok", "okay", "oka", "dale", "listo", "perfecto",
+            "genial", "barbaro", "bárbaro", "chau", "adios", "adiós", "hasta luego",
+            "si", "sí", "no", "👍", "🙏", "😀");
+
+    private boolean isTrivialMessage(String message) {
+        if (message == null) return true;
+        String m = message.trim().toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[!¡?¿.,;:]+$", "").trim();
+        return m.isEmpty() || TRIVIAL_MESSAGES.contains(m);
     }
 
-    public boolean shouldOpenWhiteboardLocally(StreamPrep prep) {
-        if (prep == null || prep.userMessage() == null) return false;
-        String msg = prep.userMessage().toLowerCase(java.util.Locale.ROOT);
-        return msg.contains("pizarra") || msg.contains("whiteboard")
-                || msg.contains("explicame en") || msg.contains("explicá en")
-                || msg.contains("mostralo en") || msg.contains("abrí la")
-                || msg.contains("abri la");
+    public boolean shouldUseRegisteredTools(StreamPrep prep) {
+        if (prep == null) return false;
+        // Pizarra activa: las tools quedan siempre disponibles para continuar el workspace.
+        if (shouldUseRegisteredTools(prep.activeWhiteboardId(), prep.whiteboardInterpretation())) return true;
+        // En el resto, el LLM decide cuándo abrir/usar la "Resolución guiada" según la intención
+        // educativa. Solo evitamos el path bloqueante de tools en charla trivial (saludos, acuses),
+        // para no perder el streaming en mensajes que claramente no necesitan workspace.
+        return !isTrivialMessage(prep.userMessage());
     }
 
     public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {
@@ -190,7 +194,7 @@ public class ChatService {
     public WhiteboardAction openWhiteboardFallback(Long conversationId, String userEmail) {
         WhiteboardDto dto = whiteboardService.openForTeaching(
                 conversationId,
-                "Pizarra de enseñanza",
+                "Resolución guiada",
                 "teaching",
                 userEmail
         );
@@ -201,39 +205,6 @@ public class ChatService {
         payload.put("title", dto.title());
         payload.put("mode", dto.mode());
         return new WhiteboardAction("OPEN_WHITEBOARD", payload);
-    }
-
-    public boolean shouldForceExerciseBreakdown(StreamPrep prep) {
-        String text = prep.userMessage() == null ? "" : prep.userMessage().toLowerCase();
-        boolean asksForSteps = text.contains("paso a paso")
-                || text.contains("desglos")
-                || text.contains("guía")
-                || text.contains("guia")
-                || text.contains("ayudame con el ejercicio")
-                || text.contains("ayúdame con el ejercicio")
-                || text.contains("explicame el ejercicio")
-                || text.contains("explícame el ejercicio");
-        boolean mentionsExercise = text.contains("ejercicio") || text.contains("exercise");
-        return asksForSteps && mentionsExercise;
-    }
-
-    public Object executeExerciseBreakdownFallback(StreamPrep prep) {
-        String exerciseTitle = extractExerciseTitle(prep.userMessage());
-        String exerciseText = buildExerciseText(prep);
-        String userLevel = mapUserLevel(prep.explanationLevel());
-        boolean showFullSolution = asksForFullSolution(prep.userMessage());
-
-        try {
-            String args = objectMapper.writeValueAsString(Map.of(
-                    "exerciseText", exerciseText,
-                    "exerciseTitle", exerciseTitle,
-                    "userLevel", userLevel,
-                    "showFullSolution", showFullSolution
-            ));
-            return toolRegistry.execute("break_down_exercise", args);
-        } catch (Exception e) {
-            throw new RuntimeException("No se pudo ejecutar fallback de break_down_exercise", e);
-        }
     }
 
     @Transactional
@@ -592,22 +563,28 @@ public class ChatService {
         sb.append("""
 
             [TOOLS DISPONIBLES]
-            Si el estudiante pide ayuda paso a paso, guía progresiva, desglose de un ejercicio,
-            explicación por etapas, o solicita resolver un ejercicio identificado del PDF, usá la tool
-            break_down_exercise en lugar de responder como texto normal.
 
-            REGLA CRÍTICA — Si el estudiante menciona "pizarra", "ejemplo en la pizarra",
-              "dame un ejemplo en la pizarra", "explicame en la pizarra", "mostralo en la pizarra"
-              o cualquier variante que pida contenido visual:
-              1. NUNCA respondas el contenido como texto en el chat.
-              2. Llamá PRIMERO open_whiteboard.
-              3. Luego llamá inject_whiteboard_content con TODO el contenido (título, pasos, fórmulas).
-              4. En el chat solo respondé UNA oración corta como "Ya lo escribí en la pizarra →".
+            RESOLUCIÓN GUIADA (workspace visual interno):
+            - Es un recurso INTERNO de la conversación, NO una función que el estudiante deba invocar.
+              VOS decidís cuándo usarlo según la intención educativa, no por palabras clave.
+              El estudiante NUNCA necesita pedir "abrir pizarra". Nunca menciones la palabra "pizarra".
+            - Usalo cuando el contenido se entiende mejor de forma visual y secuencial. Ejemplos:
+              · "No entiendo este ejercicio" → abrí/usá el workspace y descomponé el problema en bloques.
+              · "Mostrame cómo se resuelve" → escribí la resolución paso a paso en el workspace.
+              · "Explicame el algoritmo" → un bloque por cada etapa del algoritmo.
+              · "¿Por qué da 25?" → agregá una explicación al workspace existente.
+            - REUTILIZÁ el workspace existente: si en el contexto ya ves un bloque
+              [RESOLUCIÓN GUIADA] con whiteboardId, agregá contenido AHÍ con inject_whiteboard_content
+              (NO llames open_whiteboard de nuevo, no crees uno nuevo ni borres lo anterior).
+              Solo usá open_whiteboard cuando todavía no existe ningún workspace en la conversación.
+            - Cuando uses el workspace, NO repitas todo el contenido como texto en el chat:
+              respondé con UNA frase breve y natural (p. ej. "Te lo armo en la resolución guiada →").
             - inject_whiteboard_content fragmenta el contenido en bloques pequeños y los persiste.
               Tipos de bloque: TITLE (título), TEXT (párrafo), STEP (paso numerado), FORMULA (expresión),
-              EXAMPLE (ejemplo), WARNING (advertencia), QUESTION (pregunta al estudiante), SYSTEM_NOTE.
-              Cada bloque lleva type, content y orderIndex (1, 2, 3...).
-              El LLM puede razonar sobre lo que ya inyectó en la pizarra en mensajes futuros.
+              EXAMPLE (ejemplo), NOTE (nota), WARNING (advertencia).
+              No le hagas preguntas al estudiante: resolvé vos, de a poco, paso por paso.
+              Cada bloque lleva type, content y orderIndex (continuá la numeración existente).
+              Podés razonar sobre los bloques ya presentes (de la IA y del Alumno) en mensajes futuros.
             - update_whiteboard sigue disponible para agregar entradas simples sin metadata.
 
             Razonamiento estructurado (Reasoning Graph):
@@ -625,9 +602,9 @@ public class ChatService {
 
         if (activeWhiteboardId != null && !activeWhiteboardId.isBlank()) {
             sb.append("""
-            Pizarra Inteligente:
+            Revisión del workspace (resolución guiada):
             - Si el estudiante pregunta "¿Está bien?", "¿Qué me falta?", "Revisalo", "Continuemos",
-              "Ayudame con este algoritmo" o pide revisar lo que hizo visualmente, usá tools de pizarra.
+              "Ayudame con este algoritmo" o pide revisar lo que hizo visualmente, usá las tools del workspace.
             - Si el bloque [PIZARRA INTERPRETADA] está presente, NO llames interpret_whiteboard; respondé directamente usando su Tipo, Texto OCR, Ecuación detectada y Resumen semántico.
             - Si el bloque [PIZARRA ACTIVA] incluye whiteboardId pero no hay interpretación, usá interpret_whiteboard con ese ID.
             - Si no hay whiteboardId visible, usá get_active_whiteboard para consultar la pizarra activa.
@@ -636,15 +613,15 @@ public class ChatService {
             - Para sugerir cambios visuales o paso a paso, usá propose_whiteboard_change.
             - Nunca modifiques la pizarra directamente. propose_whiteboard_change solo devuelve una sugerencia; el estudiante decide si aplicarla.
 
-            REGLA CRÍTICA — Paso a paso en la pizarra:
-            - Si la pizarra está activa (hay whiteboardId) Y el estudiante pide una explicación paso a paso,
+            REGLA — Paso a paso en el workspace:
+            - Si el workspace está activo (hay whiteboardId) Y el estudiante pide una explicación paso a paso,
               resolución de un ejercicio, o el desarrollo de un problema, NO respondas con texto en el chat.
             - En cambio, llamá propose_whiteboard_change con el parámetro "steps": un array donde cada elemento
               es un paso de la solución (string). Ejemplo:
               steps: ["Identificar la ecuación: 2x + 3 = 7", "Despejar x: 2x = 4", "Resultado: x = 2"]
             - El título (instruction) debe ser un resumen breve de lo que se resuelve.
             - En el chat respondé solo con una frase corta como:
-              "Escribí el paso a paso en la pizarra. ¿Querés que sigamos con algún paso en particular?"
+              "Lo dejé en la resolución guiada. ¿Seguimos con algún paso en particular?"
             """);
         }
         sb.append("\nPregunta del estudiante: ").append(userMessage);
@@ -740,46 +717,6 @@ public class ChatService {
             sb.append("- ").append(name).append("\n");
         }
         return sb.toString();
-    }
-
-    private String extractExerciseTitle(String userMessage) {
-        if (userMessage == null || userMessage.isBlank()) return "Ejercicio";
-        var matcher = java.util.regex.Pattern
-                .compile("(?i)ejercicio\\s+([\\w.-]+)")
-                .matcher(userMessage);
-        if (matcher.find()) {
-            return "Ejercicio " + matcher.group(1);
-        }
-        return "Ejercicio";
-    }
-
-    private String buildExerciseText(StreamPrep prep) {
-        if (prep.docChunks() != null && !prep.docChunks().isEmpty()) {
-            return prep.docChunks().stream()
-                    .map(DocumentSearchClient.DocumentChunk::chunkText)
-                    .filter(text -> text != null && !text.isBlank())
-                    .limit(4)
-                    .collect(Collectors.joining("\n\n"));
-        }
-        return prep.userMessage();
-    }
-
-    private String mapUserLevel(Integer explanationLevel) {
-        return switch (explanationLevel != null ? explanationLevel : 3) {
-            case 1, 2 -> "basico";
-            case 4, 5 -> "avanzado";
-            default -> "intermedio";
-        };
-    }
-
-    private boolean asksForFullSolution(String userMessage) {
-        String text = userMessage == null ? "" : userMessage.toLowerCase();
-        return text.contains("solución completa")
-                || text.contains("solucion completa")
-                || text.contains("respuesta final")
-                || text.contains("resolvelo completo")
-                || text.contains("resuélvelo completo")
-                || text.contains("resolver completo");
     }
 
     private String buildHydeQuery(String text, List<Message> priorWindow) {

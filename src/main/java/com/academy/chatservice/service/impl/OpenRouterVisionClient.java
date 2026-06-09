@@ -22,7 +22,7 @@ public class OpenRouterVisionClient implements VisionModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenRouterVisionClient.class);
     private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
-    private static final String DEFAULT_FREE_VISION_MODEL = "google/gemma-4-26b-a4b-it:free";
+    private static final String DEFAULT_FREE_VISION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -266,10 +266,6 @@ public class OpenRouterVisionClient implements VisionModelClient {
 
     private String freeModel(String model, String fallback) {
         if (model == null || model.isBlank()) return fallback;
-        String trimmed = model.trim();
-        if (trimmed.toLowerCase(java.util.Locale.ROOT).contains("free")) return trimmed;
-        String freeVariant = trimmed + ":free";
-        log.warn("OpenRouter vision model '{}' no es free; usando variante '{}'", trimmed, freeVariant);
-        return freeVariant;
+        return model.trim();
     }
 }

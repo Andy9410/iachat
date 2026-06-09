@@ -30,8 +30,10 @@ public class OpenRouterLLMClient implements LLMClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenRouterLLMClient.class);
     private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
-    private static final String DEFAULT_FREE_MODEL = "liquid/lfm-2.5-1.2b-instruct:free";
-    private static final String DEFAULT_FREE_VISION_MODEL = "google/gemma-4-26b-a4b-it:free";
+    // Modelos por defecto estables (pagos) para evitar el rate-limit (429) del tier free.
+    // Se pueden sobreescribir con OPENROUTER_MODEL / OPENROUTER_VISION_MODEL / OPENROUTER_TOOLS_MODEL.
+    private static final String DEFAULT_FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+    private static final String DEFAULT_FREE_VISION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -52,7 +54,7 @@ public class OpenRouterLLMClient implements LLMClient {
 
     public String toolsModelName() {
         String m = props.toolsModel();
-        return (m != null && !m.isBlank()) ? m.trim() : "meta-llama/llama-3.3-70b-instruct:free";
+        return (m != null && !m.isBlank()) ? m.trim() : "nvidia/nemotron-3-ultra-550b-a55b:free";
     }
 
     @Override
@@ -488,12 +490,12 @@ public class OpenRouterLLMClient implements LLMClient {
         );
     }
 
+    /**
+     * Devuelve el modelo configurado tal cual (o el fallback). Antes forzaba la variante ":free",
+     * lo que arrastraba todo al tier gratuito de OpenRouter y provocaba rate-limit (429).
+     */
     private String freeModel(String model, String fallback) {
         if (model == null || model.isBlank()) return fallback;
-        String trimmed = model.trim();
-        if (trimmed.toLowerCase(java.util.Locale.ROOT).contains("free")) return trimmed;
-        String freeVariant = trimmed + ":free";
-        log.warn("OpenRouter model '{}' no es free; usando variante '{}'", trimmed, freeVariant);
-        return freeVariant;
+        return model.trim();
     }
 }

@@ -180,13 +180,10 @@ public class ChatService {
      * Apertura determinística del workspace de Resolución guiada cuando el mensaje pide
      * claramente resolver / usar la pizarra. Es una red de seguridad: el LLM también puede
      * abrirlo por su cuenta vía la tool open_whiteboard, pero los modelos chicos no hacen
-     * tool-calling confiable, así que para pedidos explícitos lo abrimos nosotros y dejamos
-     * que el flujo /teach (generación plana) resuelva paso a paso.
+     * tool-calling confiable, así que para pedidos explícitos generamos y persistimos nosotros.
      */
     public boolean shouldOpenWorkspaceLocally(StreamPrep prep) {
         if (prep == null || prep.userMessage() == null) return false;
-        // Si ya hay pizarra activa, el modelo continúa por contexto; no forzamos otra apertura.
-        if (prep.activeWhiteboardId() != null && !prep.activeWhiteboardId().isBlank()) return false;
 
         String m = prep.userMessage().toLowerCase(java.util.Locale.ROOT);
         boolean explicit = m.contains("pizarra") || m.contains("resolución guiada") || m.contains("resolucion guiada");
@@ -198,6 +195,16 @@ public class ChatService {
         // Ecuación / expresión a resolver: contiene un '=' junto a algún dígito.
         boolean hasEquation = m.matches(".*\\d[^=]*=.*") || m.matches(".*=[^=]*\\d.*");
         return explicit || wantsResolution || hasEquation;
+    }
+
+    public boolean hasWorkspaceContent(WhiteboardAction action) {
+        if (action == null || action.payload() == null) return false;
+
+        Object blocks = action.payload().get("blocks");
+        if (blocks instanceof java.util.Collection<?> collection && !collection.isEmpty()) return true;
+
+        Object entries = action.payload().get("entries");
+        return entries instanceof java.util.Collection<?> collection && !collection.isEmpty();
     }
 
     public boolean shouldUseRegisteredTools(String activeWhiteboardId, WhiteboardInterpretationResponse whiteboardInterpretation) {
@@ -229,6 +236,72 @@ public class ChatService {
         payload.put("title", dto.title());
         payload.put("mode", dto.mode());
         return new WhiteboardAction("OPEN_WHITEBOARD", payload);
+    }
+
+    /**
+     * Abre/recupera el workspace, actualiza la intención a la tarea actual, genera la resolución
+     * y la PERSISTE como una nueva sección, devolviendo la acción con los bloques generados.
+     * Garantiza la sincronización: si algo falla, lanza excepción (el caller NO debe afirmar que
+     * "lo armó en la resolución guiada"). El frontend anexa los bloques y re-renderiza al instante.
+     */
+    @Transactional
+    public WhiteboardAction openAndResolveWorkspace(Long conversationId, String userMessage, String userEmail) {
+        // 1. Crear o recuperar el workspace
+        WhiteboardDto dto = whiteboardService.openForTeaching(conversationId, "Resolución guiada", "teaching", userEmail);
+        log.info("[WS] Workspace encontrado/creado whiteboardId={} conversationId={}", dto.id(), conversationId);
+
+        // 2. Actualizar la intención a la última tarea solicitada
+        String intent = userMessage != null ? userMessage.trim() : "";
+        whiteboardService.updateIntent(dto.id(), intent, userEmail);
+        log.info("[WS] Nueva intención whiteboardId={} intent='{}'", dto.id(), intent);
+
+        // 3. Generar la resolución (bloques) para la tarea actual
+        String raw = llmClient.generate(buildResolutionPrompt(userMessage));
+        var fragment = whiteboardService.parseTeachFragment(raw);
+        if (fragment.blocks() == null || fragment.blocks().isEmpty()) {
+            throw new IllegalStateException("El modelo no devolvió bloques para la resolución");
+        }
+        log.info("[WS] Contenido generado whiteboardId={} bloques={}", dto.id(), fragment.blocks().size());
+
+        // 4. Persistir como nueva sección (orderIndex continúa al existente)
+        List<InjectWhiteboardRequest.BlockRequest> blockReqs = new java.util.ArrayList<>();
+        int idx = 1;
+        for (var b : fragment.blocks()) {
+            blockReqs.add(new InjectWhiteboardRequest.BlockRequest(
+                    b.get("type"), "assistant", b.get("content"), idx++, null));
+        }
+        List<WhiteboardEntryDto> saved = whiteboardService.injectBlocks(dto.id(), conversationId, blockReqs, userEmail);
+        if (saved.isEmpty()) {
+            throw new IllegalStateException("No se persistió contenido en el workspace");
+        }
+        log.info("[WS] Workspace actualizado correctamente whiteboardId={} bloquesGuardados={}", dto.id(), saved.size());
+
+        // 5. Acción con los bloques nuevos para que el frontend los anexe y re-renderice
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("conversationId", dto.conversationId());
+        payload.put("whiteboardId", dto.id());
+        payload.put("title", dto.title());
+        payload.put("mode", dto.mode());
+        payload.put("blocks", saved);
+        log.info("[WS] Evento OPEN_WHITEBOARD enviado al frontend whiteboardId={} bloques={}", dto.id(), saved.size());
+        return new WhiteboardAction("OPEN_WHITEBOARD", payload);
+    }
+
+    private String buildResolutionPrompt(String userMessage) {
+        String task = userMessage != null ? userMessage.trim() : "";
+        return """
+            Resolvé el siguiente problema paso a paso para mostrarlo en un workspace visual.
+            Problema: %s
+
+            Devolvé ÚNICAMENTE JSON válido (sin markdown, sin backticks) con esta forma exacta:
+            {"blocks":[{"type":"TITLE","content":"..."},{"type":"STEP","content":"..."},{"type":"FORMULA","content":"..."}]}
+
+            Reglas:
+            - El PRIMER bloque debe ser TITLE nombrando la resolución (ej: "Resolver %s").
+            - Luego 3 a 6 bloques STEP/FORMULA con el desarrollo y un STEP final con el resultado.
+            - Las fórmulas van en content sin el símbolo '$'.
+            - No incluyas el campo "question". Respondé solo el JSON.
+            """.formatted(task, task);
     }
 
     @Transactional

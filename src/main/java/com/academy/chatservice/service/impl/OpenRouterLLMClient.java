@@ -30,10 +30,10 @@ public class OpenRouterLLMClient implements LLMClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenRouterLLMClient.class);
     private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
-    // Modelos por defecto estables (pagos) para evitar el rate-limit (429) del tier free.
+    // Modelos por defecto gratuitos; se pueden sobreescribir por variable de entorno.
     // Se pueden sobreescribir con OPENROUTER_MODEL / OPENROUTER_VISION_MODEL / OPENROUTER_TOOLS_MODEL.
-    private static final String DEFAULT_FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
-    private static final String DEFAULT_FREE_VISION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+    private static final String DEFAULT_FREE_MODEL = "nex-agi/nex-n2-pro:free";
+    private static final String DEFAULT_FREE_VISION_MODEL = "nex-agi/nex-n2-pro:free";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -54,7 +54,7 @@ public class OpenRouterLLMClient implements LLMClient {
 
     public String toolsModelName() {
         String m = props.toolsModel();
-        return (m != null && !m.isBlank()) ? m.trim() : "nvidia/nemotron-3-ultra-550b-a55b:free";
+        return (m != null && !m.isBlank()) ? m.trim() : DEFAULT_FREE_MODEL;
     }
 
     @Override

@@ -6,10 +6,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "llm.openrouter")
 public record OpenRouterProperties(
         @DefaultValue("https://openrouter.ai") String baseUrl,
-        @DefaultValue("nvidia/nemotron-3-ultra-550b-a55b:free") String model,
-        @DefaultValue("nvidia/nemotron-3-ultra-550b-a55b:free") String visionModel,
-        @DefaultValue("nvidia/nemotron-3-ultra-550b-a55b:free") String lessonModel,
-        @DefaultValue("nvidia/nemotron-3-ultra-550b-a55b:free") String toolsModel,
+        @DefaultValue("nex-agi/nex-n2-pro:free") String model,
+        @DefaultValue("nex-agi/nex-n2-pro:free") String visionModel,
+        @DefaultValue("nex-agi/nex-n2-pro:free") String lessonModel,
+        @DefaultValue("nex-agi/nex-n2-pro:free") String toolsModel,
         String apiKey,
         String whiteboardApiKey,
         @DefaultValue("false") boolean reasoningEnabled,

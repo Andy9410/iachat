@@ -67,9 +67,10 @@ document-service:
 llm:
   provider: ${LLM_PROVIDER:groq}
   openrouter:
-    model: ${OPENROUTER_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
-    tools-model: ${OPENROUTER_TOOLS_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
-    vision-model: ${OPENROUTER_VISION_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
+    model: ${OPENROUTER_MODEL:nex-agi/nex-n2-pro:free}
+    tools-model: ${OPENROUTER_TOOLS_MODEL:nex-agi/nex-n2-pro:free}
+    vision-model: ${OPENROUTER_VISION_MODEL:nex-agi/nex-n2-pro:free}
+    lesson-model: ${OPENROUTER_LESSON_MODEL:nex-agi/nex-n2-pro:free}
     reasoning-enabled: ${OPENROUTER_REASONING_ENABLED:false}
     connect-timeout-seconds: 10
     request-timeout-seconds: 120

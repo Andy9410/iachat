@@ -86,7 +86,7 @@ public class ChatService {
             throw new IllegalArgumentException("El mensaje no puede estar vacío");
         }
 
-        var conversation = resolveConversation(request.conversationId(), text, userEmail);
+        var conversation = resolveConversation(request.conversationId(), text, userEmail, firstName);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
         archiveOldMessagesIfNeeded(conversation, messageCount);
@@ -312,7 +312,7 @@ public class ChatService {
             throw new IllegalArgumentException("El mensaje no puede estar vacío");
         }
 
-        var conversation = resolveConversation(request.conversationId(), text, userEmail);
+        var conversation = resolveConversation(request.conversationId(), text, userEmail, firstName);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
         archiveOldMessagesIfNeeded(conversation, messageCount);
@@ -397,9 +397,10 @@ public class ChatService {
     }
 
     @Transactional
-    public ConversationSummaryDto createConversation(String userEmail, String title) {
+    public ConversationSummaryDto createConversation(String userEmail, String userName, String title) {
         var conversation = new Conversation();
         conversation.setUserEmail(userEmail);
+        conversation.setUserName(resolveDisplayName(userName, userEmail));
         conversation.setTitle(title == null || title.isBlank() ? "Nueva conversación" : title.trim());
         var saved = conversationRepository.save(conversation);
         return new ConversationSummaryDto(saved.getId(), saved.getTitle(), saved.getCreatedAt(), 0);
@@ -488,19 +489,25 @@ public class ChatService {
         return last;
     }
 
-    private Conversation resolveConversation(Long conversationId, String firstMessage, String userEmail) {
+    private Conversation resolveConversation(Long conversationId, String firstMessage, String userEmail, String userName) {
         if (conversationId != null) {
-            return conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
+            var existing = conversationRepository.findByIdAndUserEmail(conversationId, userEmail)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Conversación no encontrada"));
+            if (existing.getUserName() == null || existing.getUserName().isBlank()) {
+                existing.setUserName(resolveDisplayName(userName, userEmail));
+            }
+            return existing;
         }
         var conv = new Conversation();
         conv.setUserEmail(userEmail);
+        conv.setUserName(resolveDisplayName(userName, userEmail));
         int max = contextProps.titleMaxLength();
         conv.setTitle(firstMessage.length() > max ? firstMessage.substring(0, max) : firstMessage);
         return conversationRepository.save(conv);
     }
 
     private void saveUserMessage(Conversation conversation, String content, String vectorStr) {
+        conversation.setUpdatedAt(java.time.LocalDateTime.now());
         var msg = new Message();
         msg.setConversation(conversation);
         msg.setRole(Message.Role.user);
@@ -514,6 +521,7 @@ public class ChatService {
     }
 
     private void saveMessage(Conversation conversation, Message.Role role, String content, List<String> suggestions) {
+        conversation.setUpdatedAt(java.time.LocalDateTime.now());
         var msg = new Message();
         msg.setConversation(conversation);
         msg.setRole(role);
@@ -527,6 +535,17 @@ public class ChatService {
     private List<String> parseSuggestions(String json) {
         if (json == null || json.isBlank()) return List.of();
         try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { return List.of(); }
+    }
+
+    private String resolveDisplayName(String userName, String userEmail) {
+        if (userName != null && !userName.isBlank()) {
+            return userName.trim();
+        }
+        if (userEmail == null || userEmail.isBlank()) {
+            return "Usuario";
+        }
+        int at = userEmail.indexOf('@');
+        return at > 0 ? userEmail.substring(0, at) : userEmail;
     }
 
     private String toVectorString(List<Float> vector) {

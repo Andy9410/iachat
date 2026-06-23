@@ -2,6 +2,7 @@ package com.academy.chatservice.controller;
 
 import com.academy.chatservice.model.*;
 import com.academy.chatservice.model.WhiteboardAction;
+import com.academy.chatservice.service.AdminConversationService;
 import com.academy.chatservice.service.ChatService;
 import com.academy.chatservice.service.LLMClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +20,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.LocalDate;
 import java.util.Map;
 import org.springframework.security.oauth2.jwt.Jwt;
 
@@ -28,11 +30,16 @@ public class ChatController {
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
     private final ChatService chatService;
+    private final AdminConversationService adminConversationService;
     private final LLMClient llmClient;
     private final ObjectMapper objectMapper;
 
-    public ChatController(ChatService chatService, LLMClient llmClient, ObjectMapper objectMapper) {
+    public ChatController(ChatService chatService,
+                          AdminConversationService adminConversationService,
+                          LLMClient llmClient,
+                          ObjectMapper objectMapper) {
         this.chatService = chatService;
+        this.adminConversationService = adminConversationService;
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
     }
@@ -63,7 +70,47 @@ public class ChatController {
             @RequestBody(required = false) ConversationCreateRequest request,
             @AuthenticationPrincipal Jwt jwt) {
         String title = request != null ? request.title() : null;
-        return ResponseEntity.ok(chatService.createConversation(jwt.getSubject(), title));
+        return ResponseEntity.ok(chatService.createConversation(jwt.getSubject(), jwt.getClaim("firstName"), title));
+    }
+
+    @GetMapping("/api/admin/conversations")
+    public ResponseEntity<AdminConversationPageDto> adminConversations(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to,
+            @AuthenticationPrincipal Jwt jwt) {
+        requireAdmin(jwt);
+        return ResponseEntity.ok(adminConversationService.getPage(
+                new AdminConversationFilters(email, name, title, from, to),
+                page,
+                size
+        ));
+    }
+
+    @GetMapping("/api/admin/conversations/metrics")
+    public ResponseEntity<AdminConversationMetricsDto> adminConversationMetrics(
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to,
+            @AuthenticationPrincipal Jwt jwt) {
+        requireAdmin(jwt);
+        return ResponseEntity.ok(adminConversationService.getMetrics(
+                new AdminConversationFilters(email, name, title, from, to)
+        ));
+    }
+
+    @GetMapping("/api/admin/conversations/{conversationId}")
+    public ResponseEntity<AdminConversationDetailDto> adminConversationDetail(
+            @PathVariable Long conversationId,
+            @AuthenticationPrincipal Jwt jwt) {
+        requireAdmin(jwt);
+        return ResponseEntity.ok(adminConversationService.getDetail(conversationId));
     }
 
     @GetMapping("/api/conversations/{id}/messages")
@@ -120,8 +167,27 @@ public class ChatController {
             var sentContent = new StringBuilder();
             boolean[] markerFound = {false};
 
-            // La apertura del workspace ("Resolución guiada") la decide el modelo vía la tool
-            // open_whiteboard según la intención educativa; ya no se abre por keywords del usuario.
+            // Red de seguridad determinística: si el mensaje pide claramente resolver / usar la
+            // pizarra, generamos y persistimos el workspace nosotros antes de responder. No
+            // dependemos del tool-calling del modelo, poco confiable en modelos chicos.
+            if (chatService.shouldOpenWorkspaceLocally(prep)) {
+                try {
+                    // Sincrónico: genera + persiste la resolución de la tarea actual ANTES de responder.
+                    WhiteboardAction action = chatService.openAndResolveWorkspace(
+                            prep.conversationId(), prep.userMessage(), userEmail);
+                    String answer = "Lo armé en la resolución guiada de la derecha. Mirá el paso a paso ahí.";
+                    sse(writer, objectMapper.writeValueAsString(Map.of("type", "action", "action", action)));
+                    chatService.finalizeStream(prep.conversationId(), answer, List.of());
+                    sse(writer, objectMapper.writeValueAsString(Map.of("type", "chunk", "text", answer)));
+                    sse(writer, "{\"type\":\"done\"}");
+                    return;
+                } catch (Exception e) {
+                    // Si falla generar/persistir, NO afirmamos que lo armamos: seguimos con la
+                    // respuesta normal del chat (consistencia entre chat y workspace).
+                    log.warn("[WS] No se pudo resolver en el workspace conversation_id={}: {}",
+                            prep.conversationId(), e.getMessage(), e);
+                }
+            }
 
             boolean useRegisteredTools = llmClient.supportsToolCalling() && chatService.shouldUseRegisteredTools(prep);
             if (useRegisteredTools) {
@@ -133,13 +199,20 @@ public class ChatController {
 
                         // Whiteboard actions: emit SSE action and avoid extra LLM calls for opening.
                         if (toolResult instanceof WhiteboardAction action) {
+                            if ("OPEN_WHITEBOARD".equals(action.type()) && !chatService.hasWorkspaceContent(action)) {
+                                log.info("[WS] Tool open_whiteboard no trajo contenido; generando resolución sincronizada conversation_id={}",
+                                        prep.conversationId());
+                                action = chatService.openAndResolveWorkspace(
+                                        prep.conversationId(), prep.userMessage(), userEmail);
+                            }
+
                             log.info("[TOOLS] emitting whiteboard action conversation_id={} tool={} action={}",
                                     prep.conversationId(), toolCall.name(), action.type());
                             sse(writer, objectMapper.writeValueAsString(
                                     java.util.Map.of("type", "action", "action", action)));
 
-                            if ("OPEN_WHITEBOARD".equals(action.type())) {
-                                full.append("Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.");
+                            if (chatService.hasWorkspaceContent(action)) {
+                                full.append("Lo armé en la resolución guiada de la derecha. Mirá el paso a paso ahí.");
                             } else {
                                 String actionContext = "\n\n[ACCIÓN EJECUTADA: " + toolCall.name() + "]\n"
                                         + objectMapper.writeValueAsString(action);
@@ -191,17 +264,18 @@ public class ChatController {
                             || msg.contains("explicame en") || msg.contains("mostralo en");
                     if (wantedWhiteboard) {
                         try {
-                            WhiteboardAction fallbackAction = chatService.openWhiteboardFallback(prep.conversationId(), userEmail);
-                            log.info("[TOOLS] emitting fallback whiteboard action conversation_id={} action={}",
+                            WhiteboardAction fallbackAction = chatService.openAndResolveWorkspace(
+                                    prep.conversationId(), prep.userMessage(), userEmail);
+                            log.info("[TOOLS] emitting fallback resolved workspace action conversation_id={} action={}",
                                     prep.conversationId(), fallbackAction.type());
                             sse(writer, objectMapper.writeValueAsString(
                                     java.util.Map.of("type", "action", "action", fallbackAction)));
-                            full.append("Lo armo en la resolución guiada de la derecha. Seguimos paso a paso ahí.");
+                            full.append("Lo armé en la resolución guiada de la derecha. Mirá el paso a paso ahí.");
                         } catch (Exception fallbackError) {
 
-                            log.warn("[TOOLS] Falló fallback local de pizarra conversation_id={}: {}",
+                            log.warn("[TOOLS] Falló fallback local de resolución guiada conversation_id={}: {}",
                                     prep.conversationId(), fallbackError.getMessage());
-                            full.append("No pude abrir la pizarra en este momento. Intentá de nuevo en unos segundos.");
+                            full.append("No pude actualizar la resolución guiada en este momento. Intentá de nuevo en unos segundos.");
                         }
                     } else {
                         llmClient.generateStream(prep.prompt(), chunk -> {
@@ -288,6 +362,15 @@ public class ChatController {
             log.error("Error en /chat/stream: {}", e.getMessage(), e);
             Sentry.captureException(e);
             try { sse(writer, "{\"type\":\"error\"}"); } catch (Exception ignored) {}
+        }
+    }
+
+    private void requireAdmin(Jwt jwt) {
+        if (jwt == null || !"ROLE_ADMIN".equals(jwt.getClaimAsString("role"))) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "Acceso solo para administradores"
+            );
         }
     }
 

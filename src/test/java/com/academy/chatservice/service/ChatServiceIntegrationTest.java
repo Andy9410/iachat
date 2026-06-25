@@ -14,8 +14,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.mockito.ArgumentCaptor;
 
 // archive-threshold=6, window=2 (test application.yml)
 @SpringBootTest
@@ -184,5 +186,26 @@ class ChatServiceIntegrationTest {
                 .contains("memoria conversacional")
                 .contains("No encontré esta información en los documentos adjuntos")
                 .contains("La herencia permite reutilizar comportamiento.");
+    }
+
+    @Test
+    void hyde_no_sesga_consulta_hacia_programacion_cuando_el_documento_es_de_otro_tema() {
+        when(llmClient.generate(anyString()))
+                .thenReturn("Montevideo es la capital de Uruguay.")
+                .thenReturn("Respuesta del tutor");
+
+        chatService.process(
+                new ChatRequest("¿Cuál es la capital de Uruguay?", null, 99L, null, null, null),
+                USER_EMAIL,
+                FIRST_NAME
+        );
+
+        ArgumentCaptor<String> hydePromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmClient).generate(hydePromptCaptor.capture());
+
+        assertThat(hydePromptCaptor.getValue())
+                .contains("Conservá el dominio real de la pregunta")
+                .contains("¿Cuál es la capital de Uruguay?")
+                .doesNotContain("PROGRAMACIÓN/DESARROLLO DE SOFTWARE");
     }
 }

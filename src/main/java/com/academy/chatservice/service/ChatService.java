@@ -86,6 +86,9 @@ public class ChatService {
             throw new IllegalArgumentException("El mensaje no puede estar vacío");
         }
 
+        log.info("[CHAT] prepareStream requested_conversation_id={} preferred_document_id={} active_whiteboard_id={} user={}",
+                request.conversationId(), request.preferredDocumentId(), request.activeWhiteboardId(), userEmail);
+
         var conversation = resolveConversation(request.conversationId(), text, userEmail, firstName);
 
         long messageCount = messageRepository.countByConversationId(conversation.getId());
@@ -109,6 +112,9 @@ public class ChatService {
                 ? request.preferredDocumentId()
                 : conversation.getActiveDocumentId();
 
+        log.info("[CHAT] resolved_conversation_id={} active_document_id={} requested_preferred_document_id={} user={}",
+                conversation.getId(), docId, request.preferredDocumentId(), userEmail);
+
         var searchResult = docId != null
                 ? documentSearchClient.search(buildHydeQuery(text, priorWindow), userEmail, docId)
                 : DocumentSearchClient.SearchResult.empty();
@@ -130,6 +136,10 @@ public class ChatService {
                 request.explanationLevel(), firstName, includeArchived ? conversation.getArchivedContext() : null,
                 request.visiblePage(), request.activeWhiteboardId(), request.whiteboardInterpretation(),
                 conversation.getId());
+
+        log.info("[CHAT] prompt_ready conversation_id={} active_document_id={} chunks={} prompt_preview={}",
+                conversation.getId(), docId, docChunks.size(),
+                prompt.substring(0, Math.min(400, prompt.length())).replace('\n', ' '));
 
         return new StreamPrep(conversation.getId(), prompt, docChunks, null, text,
                 request.explanationLevel(), request.activeWhiteboardId(), request.whiteboardInterpretation());
@@ -838,8 +848,17 @@ public class ChatService {
     private String buildHydeQuery(String text, List<Message> priorWindow) {
         String base = buildSearchQuery(text, priorWindow);
         try {
-            String hydePrompt = "Responde en 2 oraciones técnicas y concisas sobre PROGRAMACIÓN/DESARROLLO DE SOFTWARE a: \"" + base
-                    + "\". Solo el contenido técnico, sin saludos ni explicaciones adicionales.";
+            String hydePrompt = """
+                    Generá una respuesta hipotética breve para mejorar recuperación semántica.
+                    Reglas:
+                    - Conservá el dominio real de la pregunta. No lo conviertas a otro tema.
+                    - Si la pregunta es sobre matemática, respondé sobre matemática.
+                    - Si es sobre teoría, geografía, programación u otro tema, mantenelo exactamente en ese tema.
+                    - No inventes contexto externo ni cambies el ejercicio/documento.
+                    - Devolvé solo 2 oraciones informativas, sin saludos ni markdown.
+
+                    Pregunta: "%s"
+                    """.formatted(base);
             log.info("[LLM] provider={} model={}", llmClient.getClass().getSimpleName(), llmClient.modelName());
             String hypothetical = llmClient.generate(hydePrompt).trim();
             if (!hypothetical.isBlank()) {

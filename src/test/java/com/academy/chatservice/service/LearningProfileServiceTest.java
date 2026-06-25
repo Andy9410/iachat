@@ -7,6 +7,10 @@ import com.academy.chatservice.model.LearningProfileSignals;
 import com.academy.chatservice.repository.LearningProfileRepository;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,7 +31,8 @@ class LearningProfileServiceTest {
                         List.of()
                 )
         );
-        LearningProfileService service = new LearningProfileService(repository, new ProfileMaturityCalculator());
+        Clock clock = Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC);
+        LearningProfileService service = new LearningProfileService(repository, new ProfileMaturityCalculator(), clock);
 
         LearningProfileDto profile = service.getProfile("learnsoft@edu.uy");
 
@@ -35,8 +40,51 @@ class LearningProfileServiceTest {
         assertThat(profile.recommendations().getFirst().title()).contains("p7 2025 S2");
         assertThat(profile.recommendations().getFirst().description()).contains("Ejercicio 10");
         assertThat(profile.weeklyStudyPlan()).isNotEmpty();
+        assertThat(profile.weeklyStudyPlan().getFirst().dayLabel()).isEqualTo("Dia 1");
+        assertThat(profile.weeklyStudyPlan().getFirst().date()).isEqualTo(LocalDate.of(2026, 6, 25));
         assertThat(profile.weeklyStudyPlan().getFirst().title()).contains("p7 2025 S2");
         assertThat(profile.weeklyStudyPlan().get(1).title()).contains("p6 2025 S2");
+    }
+
+    @Test
+    void shouldRecalculateWeeklyPlanDatesFromCurrentServerDayWithoutChangingDistribution() {
+        LearningProfileRepository repository = new StubLearningProfileRepository(
+                LearningEvidenceSnapshot.of(8, 11, 36),
+                new LearningProfileSignals(
+                        List.of("p7_2025_S2.pdf", "p6_2025_S2.pdf"),
+                        List.of(
+                                new LearningExerciseSignal("p7_2025_S2.pdf", "ejercicio 10.", 2),
+                                new LearningExerciseSignal("p6_2025_S2.pdf", "ejercicio 8.", 2),
+                                new LearningExerciseSignal("p5_2025 - S2.pdf", "ejercicio 7.", 2)
+                        ),
+                        List.of()
+                )
+        );
+
+        LearningProfileDto todayProfile = new LearningProfileService(
+                repository,
+                new ProfileMaturityCalculator(),
+                Clock.fixed(Instant.parse("2026-06-25T08:00:00Z"), ZoneOffset.UTC)
+        ).getProfile("learnsoft@edu.uy");
+
+        LearningProfileDto tomorrowProfile = new LearningProfileService(
+                repository,
+                new ProfileMaturityCalculator(),
+                Clock.fixed(Instant.parse("2026-06-26T08:00:00Z"), ZoneOffset.UTC)
+        ).getProfile("learnsoft@edu.uy");
+
+        assertThat(todayProfile.weeklyStudyPlan()).hasSize(tomorrowProfile.weeklyStudyPlan().size());
+        assertThat(todayProfile.weeklyStudyPlan())
+                .extracting(item -> item.title(), item -> item.focus(), item -> item.activity())
+                .containsExactlyElementsOf(
+                        tomorrowProfile.weeklyStudyPlan()
+                                .stream()
+                                .map(item -> org.assertj.core.groups.Tuple.tuple(item.title(), item.focus(), item.activity()))
+                                .toList()
+                );
+        assertThat(tomorrowProfile.weeklyStudyPlan())
+                .extracting(item -> item.date().toString())
+                .containsExactly("2026-06-26", "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30");
     }
 
     private static final class StubLearningProfileRepository extends LearningProfileRepository {

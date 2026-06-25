@@ -9,8 +9,11 @@ import com.academy.chatservice.model.LearningRecommendationDto;
 import com.academy.chatservice.model.ProfileMaturity;
 import com.academy.chatservice.model.WeeklyStudyPlanItemDto;
 import com.academy.chatservice.repository.LearningProfileRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,11 +25,20 @@ public class LearningProfileService {
 
     private final LearningProfileRepository learningProfileRepository;
     private final ProfileMaturityCalculator profileMaturityCalculator;
+    private final Clock clock;
 
+    @Autowired
     public LearningProfileService(LearningProfileRepository learningProfileRepository,
                                   ProfileMaturityCalculator profileMaturityCalculator) {
+        this(learningProfileRepository, profileMaturityCalculator, Clock.systemDefaultZone());
+    }
+
+    LearningProfileService(LearningProfileRepository learningProfileRepository,
+                           ProfileMaturityCalculator profileMaturityCalculator,
+                           Clock clock) {
         this.learningProfileRepository = learningProfileRepository;
         this.profileMaturityCalculator = profileMaturityCalculator;
+        this.clock = clock;
     }
 
     public LearningProfileDto getProfile(String userEmail) {
@@ -136,10 +148,12 @@ public class LearningProfileService {
         DocumentExerciseBlock thirdBlock = nth(blocks, 2);
         DocumentExerciseBlock fourthBlock = nth(blocks, 3);
         DocumentExerciseBlock reviewBlock = fourthBlock != null ? fourthBlock : (thirdBlock != null ? thirdBlock : secondBlock);
+        LocalDate startDate = LocalDate.now(clock);
 
         return List.of(
                 new WeeklyStudyPlanItemDto(
-                        "Lunes",
+                        "Dia 1",
+                        startDate,
                         firstBlock != null
                                 ? formatDocument(firstBlock.documentName())
                                 : "2 ejercicios nuevos",
@@ -151,7 +165,8 @@ public class LearningProfileService {
                                 : "Elegí 2 ejercicios de documentos distintos. Intentá resolverlos sin ayuda durante 10 minutos cada uno y registrá en TutorIA solamente el punto exacto donde te trabaste."
                 ),
                 new WeeklyStudyPlanItemDto(
-                        "Martes",
+                        "Dia 2",
+                        startDate.plusDays(1),
                         secondBlock != null
                                 ? formatDocument(secondBlock.documentName())
                                 : "1 corrección guiada",
@@ -163,7 +178,8 @@ public class LearningProfileService {
                                 : "Tomá el ejercicio que peor salió el lunes y pedile a TutorIA una explicación paso a paso. Cerrá con una variante corta del mismo tipo de ejercicio."
                 ),
                 new WeeklyStudyPlanItemDto(
-                        "Miércoles",
+                        "Dia 3",
+                        startDate.plusDays(2),
                         thirdBlock != null
                                 ? formatDocument(thirdBlock.documentName())
                                 : "3 intentos sin asistencia",
@@ -175,7 +191,8 @@ public class LearningProfileService {
                                 : "Resolvé 3 ejercicios seguidos sin abrir respuesta ni pedir hints. Al final usá TutorIA sólo para validar el resultado o ubicar errores concretos."
                 ),
                 new WeeklyStudyPlanItemDto(
-                        "Jueves",
+                        "Dia 4",
+                        startDate.plusDays(3),
                         reviewBlock != null
                                 ? "Repaso de " + formatDocument(reviewBlock.documentName())
                                 : "Rehacer fallos",
@@ -187,7 +204,8 @@ public class LearningProfileService {
                                 : "Rehacé 2 ejercicios que ya habías fallado. Si volvés a errar, escribí en el chat exactamente en qué paso te equivocaste y qué regla aplicaste mal."
                 ),
                 new WeeklyStudyPlanItemDto(
-                        "Viernes",
+                        "Dia 5",
+                        startDate.plusDays(4),
                         firstBlock != null
                                 ? "Cierre con " + formatDocument(firstBlock.documentName())
                                 : "1 ejercicio más difícil",

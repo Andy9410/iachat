@@ -23,7 +23,7 @@ class ProfileMaturityCalculatorTest {
 
     @Test
     void shouldReturnInitialWhenInitialThresholdsAreMet() {
-        LearningEvidenceSnapshot snapshot = LearningEvidenceSnapshot.of(2, 14, 8);
+        LearningEvidenceSnapshot snapshot = LearningEvidenceSnapshot.of(2, 5, 8);
 
         assertEquals(ProfileMaturity.PERFIL_INICIAL, calculator.calculateMaturity(snapshot));
         assertTrue(calculator.isEnoughDataForRecommendations(snapshot));
@@ -33,7 +33,7 @@ class ProfileMaturityCalculatorTest {
 
     @Test
     void shouldReturnReliableWhenReliableThresholdsAreMet() {
-        LearningEvidenceSnapshot snapshot = LearningEvidenceSnapshot.of(4, 10, 18);
+        LearningEvidenceSnapshot snapshot = LearningEvidenceSnapshot.of(4, 5, 18);
 
         assertEquals(ProfileMaturity.PERFIL_CONFIABLE, calculator.calculateMaturity(snapshot));
         assertTrue(calculator.isEnoughDataForStrengths(snapshot));

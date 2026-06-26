@@ -25,7 +25,7 @@ public class ProfileMaturityCalculator {
             ProfileMaturity.PERFIL_CONFIABLE,
             Map.of(
                     LearningEvidenceMetric.DOCUMENTS_ANALYZED, 3L,
-                    LearningEvidenceMetric.EXERCISES_DETECTED, 10L,
+                    LearningEvidenceMetric.EXERCISES_DETECTED, 5L,
                     LearningEvidenceMetric.RELEVANT_INTERACTIONS, 15L
             )
     );
@@ -34,7 +34,7 @@ public class ProfileMaturityCalculator {
             ProfileMaturity.PERFIL_INICIAL,
             Map.of(
                     LearningEvidenceMetric.DOCUMENTS_ANALYZED, 2L,
-                    LearningEvidenceMetric.EXERCISES_DETECTED, 10L,
+                    LearningEvidenceMetric.EXERCISES_DETECTED, 5L,
                     LearningEvidenceMetric.RELEVANT_INTERACTIONS, 5L
             )
     );
@@ -43,7 +43,7 @@ public class ProfileMaturityCalculator {
             ProfileMaturity.PERFIL_CONFIABLE,
             Map.of(
                     LearningEvidenceMetric.DOCUMENTS_ANALYZED, 3L,
-                    LearningEvidenceMetric.EXERCISES_DETECTED, 10L,
+                    LearningEvidenceMetric.EXERCISES_DETECTED, 5L,
                     LearningEvidenceMetric.RELEVANT_INTERACTIONS, 15L
             )
     );

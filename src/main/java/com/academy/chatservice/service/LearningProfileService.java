@@ -143,7 +143,7 @@ public class LearningProfileService {
                         firstBlock != null
                                 ? formatDocument(firstBlock.documentName())
                                 : "2 ejercicios nuevos",
-                        "Práctica focalizada",
+                        "Practica focalizada",
                         firstBlock != null
                                 ? "Arrancá con " + joinExercises(firstBlock.exercises(), 2)
                                 + " de " + formatDocument(firstBlock.documentName())
@@ -292,7 +292,7 @@ public class LearningProfileService {
         if (evidence.documentsAnalyzed() >= 3) {
             strengths.add("Ya existe una base documental suficiente para detectar patrones estables sobre tu material de estudio.");
         }
-        if (evidence.exercisesDetected() >= 10) {
+        if (evidence.exercisesDetected() >= 5) {
             strengths.add("La práctica acumulada sobre ejercicios detectados reduce ruido y mejora la precisión de futuras recomendaciones.");
         }
         if (evidence.relevantInteractions() >= 15) {

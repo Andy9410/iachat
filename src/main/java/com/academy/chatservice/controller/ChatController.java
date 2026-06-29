@@ -5,6 +5,8 @@ import com.academy.chatservice.model.WhiteboardAction;
 import com.academy.chatservice.service.AdminConversationService;
 import com.academy.chatservice.service.ChatService;
 import com.academy.chatservice.service.LLMClient;
+import com.academy.chatservice.service.openrouter.OpenRouterApiException;
+import com.academy.chatservice.service.openrouter.OpenRouterUnavailableException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.sentry.Sentry;
 import jakarta.servlet.http.HttpServletResponse;
@@ -360,8 +362,18 @@ public class ChatController {
             sse(writer, "{\"type\":\"done\"}");
         } catch (Exception e) {
             log.error("Error en /chat/stream: {}", e.getMessage(), e);
-            Sentry.captureException(e);
-            try { sse(writer, "{\"type\":\"error\"}"); } catch (Exception ignored) {}
+            boolean upstreamOpenRouterError = findCause(e, OpenRouterUnavailableException.class) != null
+                    || findCause(e, OpenRouterApiException.class) != null;
+            if (!upstreamOpenRouterError) {
+                Sentry.captureException(e);
+            }
+            try {
+                sse(writer, objectMapper.writeValueAsString(Map.of(
+                        "type", "chunk",
+                        "text", streamErrorMessage(e)
+                )));
+                sse(writer, "{\"type\":\"done\"}");
+            } catch (Exception ignored) {}
         }
     }
 
@@ -378,6 +390,34 @@ public class ChatController {
         writer.write("data:" + data + "\n\n");
         writer.flush();
         if (writer.checkError()) throw new IOException("client disconnected");
+    }
+
+    private String streamErrorMessage(Exception ex) {
+        OpenRouterUnavailableException unavailable = findCause(ex, OpenRouterUnavailableException.class);
+        if (unavailable != null) {
+            return "El servicio de IA no está disponible en este momento. Intentá nuevamente en unos segundos.";
+        }
+
+        OpenRouterApiException apiException = findCause(ex, OpenRouterApiException.class);
+        if (apiException != null) {
+            if (apiException.statusCode() == 429) {
+                return "El servicio de IA está saturado temporalmente. Intentá nuevamente en unos segundos.";
+            }
+            return "El proveedor de IA no pudo responder en este momento. Intentá nuevamente en unos segundos.";
+        }
+
+        return "El servicio encontró un error. Intentá de nuevo más tarde.";
+    }
+
+    private <T extends Throwable> T findCause(Throwable throwable, Class<T> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private boolean shouldContinueWithTextResponse(String toolName) {

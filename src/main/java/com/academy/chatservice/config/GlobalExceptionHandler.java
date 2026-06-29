@@ -1,6 +1,7 @@
 package com.academy.chatservice.config;
 
 import com.academy.chatservice.model.ChatResponse;
+import com.academy.chatservice.service.openrouter.OpenRouterUnavailableException;
 import io.sentry.Sentry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ChatResponse> handleResponseStatus(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode())
                 .body(new ChatResponse(ex.getReason(), null));
+    }
+
+    @ExceptionHandler(OpenRouterUnavailableException.class)
+    public ResponseEntity<ChatResponse> handleOpenRouterUnavailable(OpenRouterUnavailableException ex) {
+        log.warn("OpenRouter no disponible: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ChatResponse(ex.getMessage(), null));
     }
 
     @ExceptionHandler(Exception.class)

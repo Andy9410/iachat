@@ -68,9 +68,16 @@ llm:
   provider: ${LLM_PROVIDER:groq}
   openrouter:
     model: ${OPENROUTER_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
+    models:
+      - ${OPENROUTER_MODEL_1:google/gemma-3-27b-it:free}
+      - ${OPENROUTER_MODEL_2:qwen/qwen3-32b:free}
+      - ${OPENROUTER_MODEL_3:deepseek/deepseek-r1-0528:free}
+      - ${OPENROUTER_MODEL_4:mistralai/devstral-small:free}
+      - ${OPENROUTER_MODEL_5:moonshotai/kimi-dev-72b:free}
     tools-model: ${OPENROUTER_TOOLS_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
     vision-model: ${OPENROUTER_VISION_MODEL:nvidia/nemotron-3-ultra-550b-a55b:free}
     reasoning-enabled: ${OPENROUTER_REASONING_ENABLED:false}
+    model-cooldown-minutes: ${OPENROUTER_MODEL_COOLDOWN_MINUTES:10}
     connect-timeout-seconds: 10
     request-timeout-seconds: 120
 

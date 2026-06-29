@@ -8,6 +8,7 @@ import com.academy.chatservice.model.tools.ToolDefinition;
 import com.academy.chatservice.service.LLMClient;
 import com.academy.chatservice.service.openrouter.OpenRouterModelRouter;
 import com.academy.chatservice.service.openrouter.OpenRouterRequestExecutor;
+import com.academy.chatservice.service.openrouter.OpenRouterUnavailableException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -70,6 +71,8 @@ public class OpenRouterLLMClient implements LLMClient {
             JsonNode json = objectMapper.readTree(response.body());
             return json.path("choices").get(0).path("message").path("content").asText();
 
+        } catch (OpenRouterUnavailableException e) {
+            throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Request a OpenRouter interrumpido", e);
@@ -108,6 +111,8 @@ public class OpenRouterLLMClient implements LLMClient {
                 }
             });
 
+        } catch (OpenRouterUnavailableException e) {
+            throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Stream a OpenRouter interrumpido", e);
@@ -130,6 +135,8 @@ public class OpenRouterLLMClient implements LLMClient {
 
             JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
             return parseToolResponse(message);
+        } catch (OpenRouterUnavailableException e) {
+            throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Request a OpenRouter interrumpido", e);

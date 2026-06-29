@@ -6,6 +6,8 @@ import com.academy.chatservice.model.tools.LLMToolResponse;
 import com.academy.chatservice.model.tools.ToolCall;
 import com.academy.chatservice.model.tools.ToolDefinition;
 import com.academy.chatservice.service.LLMClient;
+import com.academy.chatservice.service.openrouter.OpenRouterModelRouter;
+import com.academy.chatservice.service.openrouter.OpenRouterRequestExecutor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -13,42 +15,37 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 @Component
 @ConditionalOnProperty(name = "llm.provider", havingValue = "openrouter")
 public class OpenRouterLLMClient implements LLMClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenRouterLLMClient.class);
-    private static final String COMPLETIONS_PATH = "/api/v1/chat/completions";
-    // Modelos por defecto estables (pagos) para evitar el rate-limit (429) del tier free.
-    // Se pueden sobreescribir con OPENROUTER_MODEL / OPENROUTER_VISION_MODEL / OPENROUTER_TOOLS_MODEL.
     private static final String DEFAULT_FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
     private static final String DEFAULT_FREE_VISION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
-    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final OpenRouterProperties props;
+    private final OpenRouterRequestExecutor requestExecutor;
+    private final OpenRouterModelRouter modelRouter;
 
-    public OpenRouterLLMClient(ObjectMapper objectMapper, OpenRouterProperties props) {
+    public OpenRouterLLMClient(
+            ObjectMapper objectMapper,
+            OpenRouterProperties props,
+            OpenRouterRequestExecutor requestExecutor,
+            OpenRouterModelRouter modelRouter
+    ) {
         this.objectMapper = objectMapper;
         this.props = props;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(props.connectTimeoutSeconds()))
-                .build();
+        this.requestExecutor = requestExecutor;
+        this.modelRouter = modelRouter;
     }
 
     @Override
-    public String modelName() { return freeModel(props.model(), DEFAULT_FREE_MODEL); }
+    public String modelName() { return modelRouter.activeModelName(); }
 
     public String visionModelName() { return freeModel(props.visionModel(), DEFAULT_FREE_VISION_MODEL); }
 
@@ -63,9 +60,7 @@ public class OpenRouterLLMClient implements LLMClient {
     @Override
     public String generate(String prompt) {
         try {
-            var body = objectMapper.writeValueAsString(buildRequestBody(prompt, false));
-
-            var response = sendString(body, apiKeyForPrompt(prompt));
+            var response = requestExecutor.sendString(buildRequestBody(prompt, false), apiKeyForPrompt(prompt));
 
             if (response.statusCode() != 200) {
                 log.error("OpenRouter respondió con status {}: {}", response.statusCode(), response.body());
@@ -87,8 +82,7 @@ public class OpenRouterLLMClient implements LLMClient {
     @Override
     public void generateStream(String prompt, Consumer<String> onChunk) {
         try {
-            var body = objectMapper.writeValueAsString(buildRequestBody(prompt, true));
-            var response = sendLines(body, apiKeyForPrompt(prompt));
+            var response = requestExecutor.sendLines(buildRequestBody(prompt, true), apiKeyForPrompt(prompt));
 
             if (response.statusCode() != 200) {
                 String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
@@ -125,60 +119,24 @@ public class OpenRouterLLMClient implements LLMClient {
 
     @Override
     public LLMToolResponse generateWithTools(String prompt, List<ToolDefinition> tools) {
-        int maxRetries = 3;
-        int[] delaySeconds = {5, 15, 30};
-        Exception lastError = null;
+        try {
+            var response = requestExecutor.sendString(buildRequestBody(prompt, false, tools), apiKeyForPrompt(prompt));
 
-        for (int attempt = 0; attempt < maxRetries; attempt++) {
-            try {
-                if (attempt > 0) {
-                    int delay = delaySeconds[attempt - 1];
-                    log.info("[TOOLS] Reintento {} de {} para tool calling (espera {}s)", attempt, maxRetries, delay);
-                    Thread.sleep(delay * 1000L);
-                }
-
-                var body = objectMapper.writeValueAsString(buildRequestBody(prompt, false, tools));
-                var response = sendString(body, apiKeyForPrompt(prompt));
-
-                if (response.statusCode() == 429) {
-                    // Extract retry_after from response if available
-                    try {
-                        JsonNode err = objectMapper.readTree(response.body());
-                        int retryAfter = err.path("error").path("metadata").path("retry_after_seconds").asInt(delaySeconds[Math.min(attempt, delaySeconds.length - 1)]);
-                        log.warn("[TOOLS] Rate limit en intento {}. Esperando {}s", attempt + 1, retryAfter);
-                        Thread.sleep(retryAfter * 1000L);
-                    } catch (Exception ignored) {}
-                    lastError = new RuntimeException("Rate limit (429)");
-                    continue;
-                }
-
-                if (response.statusCode() != 200) {
-                    log.error("[TOOLS] OpenRouter respondió con status {} usando tools: {}", response.statusCode(),
-                            response.body().substring(0, Math.min(200, response.body().length())));
-                    throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
-                }
-
-                JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
-                return parseToolResponse(message);
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Request a OpenRouter interrumpido", e);
-            } catch (RuntimeException e) {
-                if (e.getMessage() != null && e.getMessage().contains("Rate limit")) {
-                    lastError = e;
-                } else {
-                    log.error("[TOOLS] Error llamando a OpenRouter con tools: {}", e.getMessage());
-                    throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
-                }
-            } catch (Exception e) {
-                log.error("[TOOLS] Error llamando a OpenRouter con tools: {}", e.getMessage(), e);
-                throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
+            if (response.statusCode() != 200) {
+                log.error("[TOOLS] OpenRouter respondió con status {} usando tools: {}", response.statusCode(),
+                        response.body().substring(0, Math.min(200, response.body().length())));
+                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
             }
-        } // end retry loop
 
-        log.error("[TOOLS] Agotados {} reintentos por rate limit en tool calling", maxRetries);
-        throw new RuntimeException("Error al llamar a OpenRouter con tools", lastError);
+            JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
+            return parseToolResponse(message);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Request a OpenRouter interrumpido", e);
+        } catch (Exception e) {
+            log.error("[TOOLS] Error llamando a OpenRouter con tools: {}", e.getMessage(), e);
+            throw new RuntimeException("Error al llamar a OpenRouter con tools", e);
+        }
     }
 
     public WhiteboardInterpretationResponse interpretWhiteboardImage(String imageBase64, String whiteboardId) {
@@ -187,10 +145,11 @@ public class OpenRouterLLMClient implements LLMClient {
         log.info("[WHITEBOARD_INTERPRET] whiteboardId={} Enviando a OpenRouter LLM vision. imageSize={}bytes", whiteboardId, imageSize);
 
         try {
-            var body = objectMapper.writeValueAsString(buildVisionRequestBody(imageBase64));
-            log.debug("[WHITEBOARD_INTERPRET] whiteboardId={} Request body size={}bytes", whiteboardId, body.length());
+            var body = buildVisionRequestBody(imageBase64);
+            log.debug("[WHITEBOARD_INTERPRET] whiteboardId={} Request body size={}bytes", whiteboardId,
+                    objectMapper.writeValueAsString(body).length());
 
-            var response = sendString(body, whiteboardApiKey());
+            var response = requestExecutor.sendString(body, whiteboardApiKey());
             long elapsed = System.currentTimeMillis() - startTime;
 
             log.info("[WHITEBOARD_INTERPRET] whiteboardId={} OpenRouter response: status={} elapsed={}ms",
@@ -428,32 +387,6 @@ public class OpenRouterLLMClient implements LLMClient {
                 0.0,
                 reason
         );
-    }
-
-    private HttpRequest buildHttpRequest(String body) {
-        return buildHttpRequest(body, openRouterApiKey());
-    }
-
-    private HttpRequest buildWhiteboardHttpRequest(String body) {
-        return buildHttpRequest(body, whiteboardApiKey());
-    }
-
-    private HttpRequest buildHttpRequest(String body, String apiKey) {
-        return HttpRequest.newBuilder()
-                .uri(URI.create(props.baseUrl() + COMPLETIONS_PATH))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofSeconds(props.requestTimeoutSeconds()))
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-    }
-
-    private HttpResponse<String> sendString(String body, String apiKey) throws IOException, InterruptedException {
-        return httpClient.send(buildHttpRequest(body, apiKey), HttpResponse.BodyHandlers.ofString());
-    }
-
-    private HttpResponse<Stream<String>> sendLines(String body, String apiKey) throws IOException, InterruptedException {
-        return httpClient.send(buildHttpRequest(body, apiKey), HttpResponse.BodyHandlers.ofLines());
     }
 
     private String whiteboardApiKey() {

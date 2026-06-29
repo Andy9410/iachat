@@ -6,6 +6,7 @@ import com.academy.chatservice.model.tools.LLMToolResponse;
 import com.academy.chatservice.model.tools.ToolCall;
 import com.academy.chatservice.model.tools.ToolDefinition;
 import com.academy.chatservice.service.LLMClient;
+import com.academy.chatservice.service.openrouter.OpenRouterApiException;
 import com.academy.chatservice.service.openrouter.OpenRouterModelRouter;
 import com.academy.chatservice.service.openrouter.OpenRouterRequestExecutor;
 import com.academy.chatservice.service.openrouter.OpenRouterUnavailableException;
@@ -65,13 +66,13 @@ public class OpenRouterLLMClient implements LLMClient {
 
             if (response.statusCode() != 200) {
                 log.error("OpenRouter respondió con status {}: {}", response.statusCode(), response.body());
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
+                throw new OpenRouterApiException(response.statusCode(), response.body());
             }
 
             JsonNode json = objectMapper.readTree(response.body());
             return json.path("choices").get(0).path("message").path("content").asText();
 
-        } catch (OpenRouterUnavailableException e) {
+        } catch (OpenRouterUnavailableException | OpenRouterApiException e) {
             throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -90,7 +91,7 @@ public class OpenRouterLLMClient implements LLMClient {
             if (response.statusCode() != 200) {
                 String errorBody = response.body().collect(java.util.stream.Collectors.joining("\n"));
                 log.error("OpenRouter respondió con status {} en stream: {}", response.statusCode(), errorBody);
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
+                throw new OpenRouterApiException(response.statusCode(), errorBody);
             }
 
             response.body().forEach(line -> {
@@ -111,7 +112,7 @@ public class OpenRouterLLMClient implements LLMClient {
                 }
             });
 
-        } catch (OpenRouterUnavailableException e) {
+        } catch (OpenRouterUnavailableException | OpenRouterApiException e) {
             throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -130,12 +131,12 @@ public class OpenRouterLLMClient implements LLMClient {
             if (response.statusCode() != 200) {
                 log.error("[TOOLS] OpenRouter respondió con status {} usando tools: {}", response.statusCode(),
                         response.body().substring(0, Math.min(200, response.body().length())));
-                throw new RuntimeException("OpenRouter error: HTTP " + response.statusCode());
+                throw new OpenRouterApiException(response.statusCode(), response.body());
             }
 
             JsonNode message = objectMapper.readTree(response.body()).path("choices").get(0).path("message");
             return parseToolResponse(message);
-        } catch (OpenRouterUnavailableException e) {
+        } catch (OpenRouterUnavailableException | OpenRouterApiException e) {
             throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
